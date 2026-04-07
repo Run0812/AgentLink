@@ -1,30 +1,41 @@
+/* ────────────────────────────────────────────────────────────────────────
+ * AgentLink — Obsidian plugin entry point.
+ *
+ * Wires together: settings, adapter, and the chat view.
+ * ──────────────────────────────────────────────────────────────────────── */
+
 import { Notice, Plugin } from 'obsidian';
-import { AgentLinkSettings, DEFAULT_SETTINGS } from './settings';
-import { AgentType } from './types';
-import { BaseAgent } from './agents/base';
-import { ClaudeAgent } from './agents/claude';
-import { KimiAgent } from './agents/kimi';
-import { CodexAgent } from './agents/codex';
-import { OpenCodeAgent } from './agents/opencode';
-import { AgentLinkView, AGENTLINK_VIEW_TYPE } from './views/AgentLinkView';
-import { AgentLinkSettingTab } from './views/SettingsTab';
+import { AgentAdapter, BackendType } from './core/types';
+import { logger } from './core/logger';
+import { AgentLinkSettings, DEFAULT_SETTINGS, parseArgsString, parseEnvString } from './settings/settings';
+import { AgentLinkSettingTab } from './settings/settings-tab';
+import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
+import { MockAdapter } from './adapters/mock-adapter';
+import { CliAdapter, CliAdapterConfig } from './adapters/cli-adapter';
+import { HttpAdapter, HttpAdapterConfig } from './adapters/http-adapter';
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
-	private agents: Map<AgentType, BaseAgent> = new Map();
+	private adapter: AgentAdapter | null = null;
+
+	// ── Lifecycle ──────────────────────────────────────────────────────
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.buildAgents();
+		logger.setDebug(this.settings.enableDebugLog);
+		logger.info('AgentLink: loading plugin');
 
-		// Register the sidebar view
-		this.registerView(
-			AGENTLINK_VIEW_TYPE,
-			(leaf) => new AgentLinkView(leaf, this.settings, this.agents)
-		);
+		this.buildAdapter();
 
-		// Ribbon icon to open the panel
-		this.addRibbonIcon('bot', 'Open AgentLink', () => {
+		// Register the custom sidebar view
+		this.registerView(AGENTLINK_VIEW_TYPE, (leaf) => {
+			const view = new ChatView(leaf, this.settings, () => this.settings);
+			if (this.adapter) view.setAdapter(this.adapter);
+			return view;
+		});
+
+		// Ribbon icon
+		this.addRibbonIcon('bot', 'Open Local Agent Chat', () => {
 			this.activateView();
 		});
 
@@ -33,14 +44,14 @@ export default class AgentLinkPlugin extends Plugin {
 
 		// Commands
 		this.addCommand({
-			id: 'open-agentlink-panel',
-			name: 'Open AgentLink panel',
+			id: 'open-local-agent-chat',
+			name: 'Open Local Agent Chat',
 			callback: () => this.activateView(),
 		});
 
 		this.addCommand({
 			id: 'send-selection-to-agent',
-			name: 'Send selected text to active agent',
+			name: 'Send selected text to agent',
 			editorCallback: async (editor) => {
 				const selection = editor.getSelection();
 				if (!selection) {
@@ -48,88 +59,107 @@ export default class AgentLinkPlugin extends Plugin {
 					return;
 				}
 				await this.activateView();
-				// Small delay to ensure view is ready
 				setTimeout(() => {
-					const view = this.getAgentLinkView();
-					if (view) {
-						view.prefillInput(selection);
-					}
+					const view = this.getChatView();
+					if (view) view.prefillInput(selection);
 				}, 100);
 			},
 		});
 
 		this.addCommand({
-			id: 'send-file-to-agent',
-			name: 'Send current file to active agent',
-			checkCallback: (checking) => {
-				const file = this.app.workspace.getActiveFile();
-				if (!file) return false;
-				if (checking) return true;
-				this.activateView().then(() => {
-					const view = this.getAgentLinkView();
-					if (view) view.setIncludeFile(true);
-				});
-				return true;
+			id: 'switch-backend',
+			name: 'Switch backend type',
+			callback: () => {
+				const types: BackendType[] = ['mock', 'cli', 'http'];
+				const idx = types.indexOf(this.settings.backendType);
+				const next = types[(idx + 1) % types.length];
+				this.settings.backendType = next;
+				this.saveSettings();
+				new Notice(`AgentLink: Switched to ${next}`);
 			},
 		});
 
-		this.addCommand({
-			id: 'switch-agent',
-			name: 'Switch active agent',
-			callback: () => {
-				const agents: AgentType[] = ['claude', 'kimi', 'codex', 'opencode'];
-				const current = this.settings.activeAgent;
-				const idx = agents.indexOf(current);
-				const next = agents[(idx + 1) % agents.length];
-				this.settings.activeAgent = next;
-				this.saveSettings();
-				const labels: Record<AgentType, string> = {
-					claude: 'Claude Code',
-					kimi: 'Kimi Code',
-					codex: 'Codex',
-					opencode: 'OpenCode',
-				};
-				new Notice(`AgentLink: Switched to ${labels[next]}`);
-				// Update view if open
-				const view = this.getAgentLinkView();
-				if (view) view.updateSettings(this.settings);
-			},
-		});
+		logger.info('AgentLink: plugin loaded');
 	}
 
 	async onunload(): Promise<void> {
+		logger.info('AgentLink: unloading plugin');
+		if (this.adapter) {
+			try {
+				await this.adapter.disconnect();
+			} catch {
+				// best-effort
+			}
+		}
 		this.app.workspace.detachLeavesOfType(AGENTLINK_VIEW_TYPE);
 	}
 
+	// ── Settings ───────────────────────────────────────────────────────
+
 	async loadSettings(): Promise<void> {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-		// Ensure all agent configs exist (in case new agents were added)
-		for (const agentType of ['claude', 'kimi', 'codex', 'opencode'] as AgentType[]) {
-			if (!this.settings.agents[agentType]) {
-				this.settings.agents[agentType] = DEFAULT_SETTINGS.agents[agentType];
-			}
-		}
 	}
 
 	async saveSettings(): Promise<void> {
+		logger.setDebug(this.settings.enableDebugLog);
 		await this.saveData(this.settings);
-		this.buildAgents();
-		// Refresh open view
-		const view = this.getAgentLinkView();
-		if (view) view.updateSettings(this.settings);
+		this.buildAdapter();
+		// Refresh the open view
+		const view = this.getChatView();
+		if (view) {
+			view.setAdapter(this.adapter!);
+			view.refreshSettings();
+		}
 	}
 
-	getAgent(type: AgentType): BaseAgent | undefined {
-		return this.agents.get(type);
+	// ── Adapter factory ────────────────────────────────────────────────
+
+	private buildAdapter(): void {
+		// Disconnect old adapter first
+		if (this.adapter) {
+			this.adapter.disconnect().catch(() => {});
+		}
+
+		const bt = this.settings.backendType;
+		logger.info('AgentLink: building adapter for', bt);
+
+		switch (bt) {
+			case 'mock':
+				this.adapter = new MockAdapter();
+				break;
+
+			case 'cli': {
+				const cfg: CliAdapterConfig = {
+					command: this.settings.command,
+					args: parseArgsString(this.settings.args),
+					cwd: this.settings.cwd,
+					env: parseEnvString(this.settings.env),
+					timeoutMs: this.settings.requestTimeoutMs,
+				};
+				this.adapter = new CliAdapter(cfg);
+				break;
+			}
+
+			case 'http': {
+				const cfg: HttpAdapterConfig = {
+					baseURL: this.settings.baseURL,
+					apiKey: this.settings.apiKey,
+					model: this.settings.model,
+					timeoutMs: this.settings.requestTimeoutMs,
+					headers: {},
+				};
+				this.adapter = new HttpAdapter(cfg);
+				break;
+			}
+
+			default:
+				logger.warn(`AgentLink: unsupported backend type "${bt}", falling back to mock`);
+				this.adapter = new MockAdapter();
+				break;
+		}
 	}
 
-	private buildAgents(): void {
-		this.agents.clear();
-		this.agents.set('claude', new ClaudeAgent(this.settings.agents.claude));
-		this.agents.set('kimi', new KimiAgent(this.settings.agents.kimi));
-		this.agents.set('codex', new CodexAgent(this.settings.agents.codex));
-		this.agents.set('opencode', new OpenCodeAgent(this.settings.agents.opencode));
-	}
+	// ── View helpers ───────────────────────────────────────────────────
 
 	private async activateView(): Promise<void> {
 		const { workspace } = this.app;
@@ -141,10 +171,10 @@ export default class AgentLinkPlugin extends Plugin {
 		workspace.revealLeaf(leaf);
 	}
 
-	private getAgentLinkView(): AgentLinkView | null {
+	private getChatView(): ChatView | null {
 		const leaves = this.app.workspace.getLeavesOfType(AGENTLINK_VIEW_TYPE);
 		if (leaves.length === 0) return null;
 		const view = leaves[0].view;
-		return view instanceof AgentLinkView ? view : null;
+		return view instanceof ChatView ? view : null;
 	}
 }

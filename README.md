@@ -1,6 +1,8 @@
 # AgentLink
 
-An [Obsidian](https://obsidian.md) plugin that links your vault to local AI coding agents — **Claude Code**, **Kimi Code**, **Codex** (OpenAI), and **OpenCode**.
+An [Obsidian](https://obsidian.md) desktop plugin that turns your vault into a **unified frontend for local AI agents**.
+
+Connect to any local CLI tool, HTTP server, or mock backend — all from a single chat sidebar.
 
 > **Desktop only** — requires Obsidian on macOS, Windows, or Linux.
 
@@ -8,18 +10,40 @@ An [Obsidian](https://obsidian.md) plugin that links your vault to local AI codi
 
 ## Features
 
-- 💬 **Chat panel** in the right sidebar — send messages and see markdown-rendered responses
-- 🤖 **Four agent backends** — choose the one that fits your workflow:
-  | Agent | Mode | Notes |
-  |-------|------|-------|
-  | Claude Code | CLI | Requires `claude` CLI from [claude.ai/code](https://claude.ai/code) |
-  | Kimi Code | HTTP | Requires API key from [Moonshot AI](https://platform.moonshot.cn/console/api-keys) |
-  | Codex | HTTP | Requires OpenAI API key or a local [Ollama](https://ollama.com) endpoint |
-  | OpenCode | CLI / HTTP | [opencode.ai](https://opencode.ai) — local server or CLI |
-- 📄 **Context options** — optionally include the current file or selected text in your prompt
-- 🔄 **Conversation history** — multi-turn dialogue within a session
+- 💬 **Streaming chat panel** — messages stream in real-time, with a stop button to interrupt
+- 🔌 **Pluggable adapter architecture** — UI layer depends only on an `AgentAdapter` interface:
+  | Backend | Mode | Description |
+  |---------|------|-------------|
+  | **Mock** | Built-in | Simulates streaming output for testing & development |
+  | **CLI** | `child_process.spawn` | Run any local CLI agent (Claude Code, custom scripts) |
+  | **HTTP** | `fetch` + SSE | Connect to any OpenAI-compatible local server (Ollama, LM Studio) |
+  | ACP Bridge | Reserved | Future: connect via ACP protocol bridge |
+  | Embedded Web | Reserved | Future: embed a local agent web UI |
+- 🛑 **Cancel support** — stop generation mid-stream for any backend
+- 📝 **Session history** — multi-turn conversation within a session
 - ⌨️ **Keyboard shortcut** — `Ctrl/Cmd + Enter` to send
-- ⚙️ **Settings tab** — configure binary paths, API keys, endpoints, and models per agent
+- 🐛 **Debug logging** — toggle verbose logging in developer console
+- ⚙️ **Full settings** — backend type, command, args, cwd, env vars, base URL, API key, model, timeout
+- ✅ **55 unit tests** — covering adapters, parsers, session store, logger, settings, errors
+
+---
+
+## Architecture
+
+```
+src/
+  core/       types.ts, logger.ts, errors.ts      ← shared types & utilities
+  adapters/   mock-adapter, cli-adapter, http-adapter  ← backend implementations
+  services/   session-store, process-manager, stream-parser  ← support services
+  settings/   settings.ts, settings-tab.ts         ← configuration
+  ui/         chat-view.ts                         ← Obsidian ItemView
+  main.ts                                          ← plugin entry point
+test/
+  unit/       7 test files, 55 tests
+  fixtures/   mock-cli.js, mock-http-server.js
+```
+
+The UI layer (`chat-view.ts`) depends **only** on the `AgentAdapter` interface — swapping backends requires zero UI changes.
 
 ---
 
@@ -28,63 +52,71 @@ An [Obsidian](https://obsidian.md) plugin that links your vault to local AI codi
 ### From source
 
 ```bash
-# 1. Clone into your vault's plugins folder
+# Clone into your vault's plugins folder
 cd /path/to/vault/.obsidian/plugins
 git clone https://github.com/Run0812/AgentLink agentlink
 
-# 2. Install dependencies and build
+# Install dependencies and build
 cd agentlink
 npm install
 npm run build
 
-# 3. Enable in Obsidian → Settings → Community plugins
+# Enable in Obsidian → Settings → Community plugins
 ```
 
 ---
 
-## Agent Setup
+## Quick Start
 
-### Claude Code
+1. Enable the plugin in Obsidian
+2. Click the 🤖 ribbon icon (or run command `Open Local Agent Chat`)
+3. The default backend is **Mock** — try sending a message to see streaming output
+4. Open Settings → AgentLink to switch to **CLI** or **HTTP** mode
 
-```bash
-# Install the CLI
-curl -fsSL https://claude.ai/install.sh | bash
+---
 
-# Authenticate
-claude auth login
-```
+## Backend Setup
 
-In AgentLink settings, set **Mode** to `CLI` and **Binary path** to `claude`.
+### Mock (default)
 
-### Kimi Code (Moonshot AI)
+No configuration needed. Simulates streaming output for UI testing.
 
-1. Get an API key at <https://platform.moonshot.cn/console/api-keys>
-2. In AgentLink settings, set **Mode** to `HTTP`, paste your API key, and choose a model (e.g. `moonshot-v1-8k`).
+- Type "error" in a prompt to simulate error handling
+- Cancel mid-stream with the Stop button
 
-### Codex / OpenAI
+### CLI Mode
 
-1. Get an API key at <https://platform.openai.com/api-keys>
-2. In AgentLink settings, set **Mode** to `HTTP`, paste your API key, choose model (e.g. `gpt-4o`).
+Configure in Settings → AgentLink → Backend type: "Local CLI"
 
-For a **local model via Ollama**:
+| Setting | Description | Example |
+|---------|-------------|---------|
+| Command | CLI executable | `claude`, `python`, `node` |
+| Arguments | CLI flags | `-p` |
+| Working directory | cwd for the process | `/home/user/project` |
+| Environment variables | `KEY=VALUE` per line | `ANTHROPIC_API_KEY=sk-…` |
+
+The plugin writes the prompt to the process's **stdin** and streams **stdout** back as the response.
+
+### HTTP Mode
+
+Configure in Settings → AgentLink → Backend type: "Local HTTP"
+
+| Setting | Description | Example |
+|---------|-------------|---------|
+| Base URL | Server endpoint | `http://127.0.0.1:11434/v1` |
+| API key | Bearer token (optional) | `sk-…` |
+| Model | Model identifier | `llama3`, `gpt-4o` |
+
+Supports **SSE streaming** (OpenAI-compatible `/chat/completions`).
+
+#### Example: Ollama
 
 ```bash
 ollama pull llama3
+# Ollama runs on http://localhost:11434 by default
 ```
 
-Set endpoint to `http://localhost:11434/v1` and model to `llama3`.
-
-### OpenCode
-
-```bash
-# Install
-npm install -g opencode-ai
-
-# Start the local server (optional — for HTTP mode)
-opencode serve
-```
-
-In AgentLink settings use **Mode** `CLI` (binary: `opencode`) or **Mode** `HTTP` (endpoint: `http://localhost:3000`).
+Set Base URL to `http://127.0.0.1:11434/v1`, Model to `llama3`.
 
 ---
 
@@ -92,20 +124,42 @@ In AgentLink settings use **Mode** `CLI` (binary: `opencode`) or **Mode** `HTTP`
 
 | Command | Description |
 |---------|-------------|
-| `AgentLink: Open panel` | Open the chat sidebar |
-| `AgentLink: Send selected text to active agent` | Prefill the input with your selection |
-| `AgentLink: Send current file to active agent` | Open panel with "Include file" checked |
-| `AgentLink: Switch active agent` | Cycle through all configured agents |
+| `Open Local Agent Chat` | Open the chat sidebar |
+| `Send selected text to agent` | Prefill input with editor selection |
+| `Switch backend type` | Cycle through mock → cli → http |
 
 ---
 
 ## Development
 
 ```bash
-npm install       # install dependencies
-npm run dev       # watch mode (rebuilds on save)
-npm run build     # production build
+npm install          # install dependencies
+npm run build        # production build (type-check + esbuild)
+npm run dev          # watch mode (rebuilds on save)
+npm run test         # run all 55 unit tests
+npm run test:watch   # watch mode for tests
+npm run lint         # type-check only
 ```
+
+### Running the mock fixtures
+
+```bash
+# Test CLI adapter manually
+echo "hello" | node test/fixtures/mock-cli.js
+
+# Start mock HTTP server for manual testing
+node test/fixtures/mock-http-server.js
+# → listening on http://127.0.0.1:17432
+```
+
+---
+
+## Known Limitations
+
+- **No ACP bridge** — the `acp-bridge` and `embedded-web` backends are reserved stubs
+- **No multi-session** — one conversation per panel (clear to start over)
+- **No mobile** — `isDesktopOnly: true` (requires Node.js child_process)
+- **No cloud sync** — API keys stored in local Obsidian data, never synced
 
 ---
 
