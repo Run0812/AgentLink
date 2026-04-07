@@ -1,0 +1,292 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   AgentLink Plugin Styles
+   ──────────────────────────────────────────────────────────────────────── */
+
+.agentlink-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	font-size: var(--font-ui-small);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.agentlink-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	gap: 8px;
+}
+
+.agentlink-title {
+	font-weight: 600;
+	font-size: var(--font-ui-medium);
+	color: var(--text-accent);
+	white-space: nowrap;
+}
+
+.agentlink-header-controls {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	justify-content: flex-end;
+}
+
+.agentlink-backend-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: 2px 6px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	white-space: nowrap;
+}
+
+.agentlink-clear-btn {
+	padding: 3px 10px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.agentlink-clear-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* ── Messages ────────────────────────────────────────────────────────────── */
+
+.agentlink-messages {
+	flex: 1;
+	overflow-y: auto;
+	padding: 12px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.agentlink-welcome {
+	text-align: center;
+	padding: 24px 16px;
+	color: var(--text-muted);
+}
+
+.agentlink-welcome p {
+	margin: 6px 0;
+}
+
+.agentlink-welcome-hint {
+	font-size: var(--font-ui-smaller);
+	opacity: 0.8;
+}
+
+/* ── Individual message ──────────────────────────────────────────────────── */
+
+.agentlink-message {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-width: 100%;
+}
+
+.agentlink-message-role {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	opacity: 0.7;
+}
+
+.agentlink-message-user .agentlink-message-role {
+	color: var(--text-accent);
+}
+
+.agentlink-message-assistant .agentlink-message-role {
+	color: var(--color-green);
+}
+
+.agentlink-message-error .agentlink-message-role {
+	color: var(--text-error);
+}
+
+.agentlink-message-status .agentlink-message-role {
+	color: var(--text-faint);
+}
+
+.agentlink-message-content {
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+	padding: 8px 12px;
+	color: var(--text-normal);
+	line-height: 1.5;
+	word-break: break-word;
+}
+
+.agentlink-message-user .agentlink-message-content {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.agentlink-error-content {
+	background: var(--background-modifier-error);
+	color: var(--text-error);
+}
+
+.agentlink-status-content {
+	background: transparent;
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.agentlink-message-content p {
+	margin: 0 0 6px 0;
+}
+
+.agentlink-message-content p:last-child {
+	margin-bottom: 0;
+}
+
+.agentlink-message-content pre {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 8px;
+	overflow-x: auto;
+	font-size: var(--font-ui-smaller);
+}
+
+.agentlink-message-content code:not(pre code) {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 0.9em;
+}
+
+/* ── Error message ───────────────────────────────────────────────────────── */
+
+.agentlink-error {
+	background: var(--background-modifier-error);
+	color: var(--text-error);
+	border-radius: var(--radius-m);
+	padding: 8px 12px;
+	font-size: var(--font-ui-small);
+}
+
+/* ── Status message ─────────────────────────────────────────────────────── */
+
+.agentlink-status-msg {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
+	text-align: center;
+	padding: 4px 0;
+}
+
+/* ── Input area ──────────────────────────────────────────────────────────── */
+
+.agentlink-input-area {
+	display: flex;
+	gap: 6px;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+	align-items: flex-end;
+}
+
+.agentlink-input {
+	flex: 1;
+	resize: none;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	padding: 6px 10px;
+	line-height: 1.4;
+	outline: none;
+	transition: border-color 0.15s;
+}
+
+.agentlink-input:focus {
+	border-color: var(--interactive-accent);
+}
+
+.agentlink-input::placeholder {
+	color: var(--text-faint);
+}
+
+.agentlink-btn-group {
+	display: flex;
+	gap: 4px;
+	align-self: flex-end;
+}
+
+.agentlink-send-btn {
+	padding: 6px 14px;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: opacity 0.15s;
+}
+
+.agentlink-send-btn:hover:not(:disabled) {
+	opacity: 0.85;
+}
+
+.agentlink-send-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.agentlink-stop-btn {
+	padding: 6px 14px;
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	cursor: pointer;
+	white-space: nowrap;
+	transition: opacity 0.15s;
+}
+
+.agentlink-stop-btn:hover {
+	opacity: 0.85;
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+
+.agentlink-status {
+	min-height: 20px;
+	padding: 2px 10px 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	text-align: center;
+	flex-shrink: 0;
+}
+
+.agentlink-status-loading {
+	color: var(--text-accent);
+	animation: agentlink-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes agentlink-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.4; }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "agentlink",
+  "name": "AgentLink",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Link your Obsidian vault to local AI agents like Claude Code, Kimi Code, Codex, and OpenCode.",
+  "author": "Run0812",
+  "authorUrl": "https://github.com/Run0812",
+  "isDesktopOnly": true
+}
