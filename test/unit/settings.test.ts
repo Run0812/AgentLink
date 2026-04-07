@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseEnvString, parseArgsString } from '../../src/settings/settings';
+import { parseEnvString, parseBridgeArgs } from '../../src/settings/settings';
 
 describe('parseEnvString', () => {
 	it('parses KEY=VALUE pairs', () => {
@@ -22,17 +22,17 @@ describe('parseEnvString', () => {
 	});
 });
 
-describe('parseArgsString', () => {
+describe('parseBridgeArgs', () => {
 	it('splits space-separated arguments', () => {
-		expect(parseArgsString('-p --verbose')).toEqual(['-p', '--verbose']);
+		expect(parseBridgeArgs('-p --verbose')).toEqual(['-p', '--verbose']);
 	});
 
 	it('returns empty array for empty input', () => {
-		expect(parseArgsString('')).toEqual([]);
-		expect(parseArgsString('   ')).toEqual([]);
+		expect(parseBridgeArgs('')).toEqual([]);
+		expect(parseBridgeArgs('   ')).toEqual([]);
 	});
 
 	it('trims leading/trailing whitespace', () => {
-		expect(parseArgsString('  -a -b  ')).toEqual(['-a', '-b']);
+		expect(parseBridgeArgs('  -a -b  ')).toEqual(['-a', '-b']);
 	});
 });

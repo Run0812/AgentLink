@@ -6,7 +6,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { spawn, ChildProcess } from 'child_process';
-import { AgentAdapter, AgentInput, AgentStatus, AgentStatusState, StreamHandlers } from '../core/types';
+import { AgentAdapter, AgentCapability, AgentInput, AgentStatus, AgentStatusState, StreamHandlers } from '../core/types';
 import { CancellationError, CommandNotFoundError, ProcessExitError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
 import { ProcessManager } from '../services/process-manager';
@@ -149,6 +149,12 @@ export class CliAdapter implements AgentAdapter {
 
 	getStatus(): AgentStatus {
 		return { state: this.state };
+	}
+
+	getCapabilities(): AgentCapability[] {
+		// CLI adapter capabilities depend on the underlying CLI tool
+		// Return basic chat capability by default
+		return ['chat'];
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────

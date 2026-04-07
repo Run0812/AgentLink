@@ -5,14 +5,21 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { Notice, Plugin } from 'obsidian';
-import { AgentAdapter, BackendType } from './core/types';
+import { AgentAdapter, AgentBackendConfig } from './core/types';
 import { logger } from './core/logger';
-import { AgentLinkSettings, DEFAULT_SETTINGS, parseArgsString, parseEnvString } from './settings/settings';
+import {
+	AgentLinkSettings,
+	DEFAULT_SETTINGS,
+	getActiveBackendConfig,
+	findBackendConfig,
+	createMockBackendConfig,
+} from './settings/settings';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { MockAdapter } from './adapters/mock-adapter';
-import { CliAdapter, CliAdapterConfig } from './adapters/cli-adapter';
-import { HttpAdapter, HttpAdapterConfig } from './adapters/http-adapter';
+import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
+import { EmbeddedWebAdapter, EmbeddedWebAdapterConfig } from './adapters/embedded-web-adapter';
+import { parseEnvString, parseBridgeArgs } from './settings/settings';
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
@@ -68,15 +75,8 @@ export default class AgentLinkPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'switch-backend',
-			name: 'Switch backend type',
-			callback: () => {
-				const types: BackendType[] = ['mock', 'cli', 'http'];
-				const idx = types.indexOf(this.settings.backendType);
-				const next = types[(idx + 1) % types.length];
-				this.settings.backendType = next;
-				this.saveSettings();
-				new Notice(`AgentLink: Switched to ${next}`);
-			},
+			name: 'Switch to next backend',
+			callback: () => this.switchToNextBackend(),
 		});
 
 		logger.info('AgentLink: plugin loaded');
@@ -97,7 +97,22 @@ export default class AgentLinkPlugin extends Plugin {
 	// ── Settings ───────────────────────────────────────────────────────
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const loaded = await this.loadData();
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+
+		// Migration: ensure we always have at least one backend
+		if (!this.settings.backends || this.settings.backends.length === 0) {
+			this.settings.backends = [createMockBackendConfig()];
+			this.settings.activeBackendId = 'mock-default';
+		}
+
+		// Ensure active backend exists
+		const activeExists = this.settings.backends.some(
+			b => b.id === this.settings.activeBackendId
+		);
+		if (!activeExists && this.settings.backends.length > 0) {
+			this.settings.activeBackendId = this.settings.backends[0].id;
+		}
 	}
 
 	async saveSettings(): Promise<void> {
@@ -112,6 +127,43 @@ export default class AgentLinkPlugin extends Plugin {
 		}
 	}
 
+	// ── Backend Management ─────────────────────────────────────────────
+
+	/**
+	 * Switch to the next backend in the list.
+	 */
+	private async switchToNextBackend(): Promise<void> {
+		const backends = this.settings.backends;
+		if (backends.length <= 1) {
+			new Notice('AgentLink: No other backends to switch to.');
+			return;
+		}
+
+		const currentIndex = backends.findIndex(b => b.id === this.settings.activeBackendId);
+		const nextIndex = (currentIndex + 1) % backends.length;
+		const nextBackend = backends[nextIndex];
+
+		this.settings.activeBackendId = nextBackend.id;
+		await this.saveSettings();
+
+		new Notice(`AgentLink: Switched to ${nextBackend.name}`);
+	}
+
+	/**
+	 * Switch to a specific backend by ID.
+	 */
+	async switchToBackend(backendId: string): Promise<void> {
+		const backend = findBackendConfig(this.settings, backendId);
+		if (!backend) {
+			new Notice(`AgentLink: Backend "${backendId}" not found.`);
+			return;
+		}
+
+		this.settings.activeBackendId = backendId;
+		await this.saveSettings();
+		new Notice(`AgentLink: Switched to ${backend.name}`);
+	}
+
 	// ── Adapter factory ────────────────────────────────────────────────
 
 	private buildAdapter(): void {
@@ -120,40 +172,45 @@ export default class AgentLinkPlugin extends Plugin {
 			this.adapter.disconnect().catch(() => {});
 		}
 
-		const bt = this.settings.backendType;
-		logger.info('AgentLink: building adapter for', bt);
+		const backendConfig = getActiveBackendConfig(this.settings);
+		if (!backendConfig) {
+			logger.warn('AgentLink: No active backend configured, falling back to mock');
+			this.adapter = new MockAdapter();
+			return;
+		}
 
-		switch (bt) {
+		logger.info('AgentLink: building adapter for', backendConfig.type, backendConfig.id);
+
+		switch (backendConfig.type) {
 			case 'mock':
 				this.adapter = new MockAdapter();
 				break;
 
-			case 'cli': {
-				const cfg: CliAdapterConfig = {
-					command: this.settings.command,
-					args: parseArgsString(this.settings.args),
-					cwd: this.settings.cwd,
-					env: parseEnvString(this.settings.env),
-					timeoutMs: this.settings.requestTimeoutMs,
+			case 'acp-bridge': {
+				const cfg: AcpBridgeAdapterConfig = {
+					bridgeCommand: backendConfig.bridgeCommand,
+					bridgeArgs: parseBridgeArgs(backendConfig.bridgeArgs),
+					acpServerURL: backendConfig.acpServerURL,
+					workspaceRoot: backendConfig.workspaceRoot,
+					env: parseEnvString(backendConfig.env),
+					timeoutMs: backendConfig.timeoutMs,
+					autoConfirmTools: backendConfig.autoConfirmTools,
 				};
-				this.adapter = new CliAdapter(cfg);
+				this.adapter = new AcpBridgeAdapter(cfg);
 				break;
 			}
 
-			case 'http': {
-				const cfg: HttpAdapterConfig = {
-					baseURL: this.settings.baseURL,
-					apiKey: this.settings.apiKey,
-					model: this.settings.model,
-					timeoutMs: this.settings.requestTimeoutMs,
-					headers: {},
+			case 'embedded-web': {
+				const cfg: EmbeddedWebAdapterConfig = {
+					webURL: backendConfig.webURL,
+					timeoutMs: backendConfig.timeoutMs,
 				};
-				this.adapter = new HttpAdapter(cfg);
+				this.adapter = new EmbeddedWebAdapter(cfg);
 				break;
 			}
 
 			default:
-				logger.warn(`AgentLink: unsupported backend type "${bt}", falling back to mock`);
+				logger.warn(`AgentLink: unsupported backend type, falling back to mock`);
 				this.adapter = new MockAdapter();
 				break;
 		}

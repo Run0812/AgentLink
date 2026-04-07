@@ -10,11 +10,12 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers } from '../core/types';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata } from '../core/types';
 import { CancellationError } from '../core/errors';
 import { logger } from '../core/logger';
 import { SessionStore } from '../services/session-store';
-import { AgentLinkSettings } from '../settings/settings';
+import { ToolExecutor, ToolExecutorConfig } from '../services/tool-executor';
+import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '../settings/settings';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -29,6 +30,9 @@ export class ChatView extends ItemView {
 
 	// ── Saved callbacks so we can call plugin methods ──────────────────
 	private onSettingsRead: () => AgentLinkSettings;
+
+	// ── Tool Executor ──────────────────────────────────────────────────
+	private toolExecutor: ToolExecutor;
 
 	// ── DOM references ─────────────────────────────────────────────────
 	private messagesEl!: HTMLElement;
@@ -51,6 +55,14 @@ export class ChatView extends ItemView {
 		super(leaf);
 		this.settings = settings;
 		this.onSettingsRead = onSettingsRead;
+		
+		// Initialize ToolExecutor with default config
+		const toolConfig: ToolExecutorConfig = {
+			workspaceRoot: '', // Will be updated when needed
+			autoConfirmRead: settings.autoConfirmRead,
+			autoConfirmEdit: settings.autoConfirmEdit,
+		};
+		this.toolExecutor = new ToolExecutor(this.app, toolConfig);
 	}
 
 	getViewType(): string {
@@ -74,6 +86,12 @@ export class ChatView extends ItemView {
 	refreshSettings(): void {
 		this.settings = this.onSettingsRead();
 		this.refreshStatus();
+		
+		// Update ToolExecutor config
+		this.toolExecutor.updateConfig({
+			autoConfirmRead: this.settings.autoConfirmRead,
+			autoConfirmEdit: this.settings.autoConfirmEdit,
+		});
 	}
 
 	async onOpen(): Promise<void> {
@@ -322,6 +340,14 @@ export class ChatView extends ItemView {
 		} else if (msg.role === 'status') {
 			contentEl.addClass('agentlink-status-content');
 			contentEl.setText(msg.content);
+		} else if (msg.role === 'tool_call') {
+			// Render tool call with special styling
+			contentEl.addClass('agentlink-tool-call-content');
+			this.renderToolCallContent(contentEl, msg);
+		} else if (msg.role === 'file_edit') {
+			// Render file edit with special styling
+			contentEl.addClass('agentlink-file-edit-content');
+			this.renderFileEditContent(contentEl, msg);
 		} else {
 			contentEl.createEl('p', { text: msg.content });
 		}
@@ -360,6 +386,10 @@ export class ChatView extends ItemView {
 				return 'Error';
 			case 'status':
 				return 'Status';
+			case 'tool_call':
+				return '🛠️ Tool Call';
+			case 'file_edit':
+				return '📝 File Edit';
 		}
 	}
 
@@ -386,12 +416,309 @@ export class ChatView extends ItemView {
 
 	private refreshStatus(): void {
 		if (!this.backendLabel) return;
+
+		const activeBackend = getActiveBackendConfig(this.settings);
 		const adapterLabel = this.adapter?.label ?? 'None';
 		const statusState = this.adapter?.getStatus().state ?? 'disconnected';
-		this.backendLabel.setText(`${adapterLabel} (${statusState})`);
+		const capabilities = this.adapter?.getCapabilities() ?? [];
+		const capsText = capabilities.length > 0
+			? ` [${capabilities.map(c => CAPABILITY_LABELS[c]).join(', ')}]`
+			: '';
+
+		const backendName = activeBackend?.name ?? 'None';
+		const backendType = activeBackend ? getBackendTypeLabel(activeBackend.type) : '';
+
+		this.backendLabel.setText(`${backendName} (${backendType}) - ${statusState}${capsText}`);
 	}
 
 	private scrollToBottom(): void {
 		this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+	}
+
+	// ── Tool Call & File Edit Rendering ──────────────────────────────────
+
+	private renderToolCallContent(el: HTMLElement, msg: ChatMessage): void {
+		el.empty();
+
+		const header = el.createDiv({ cls: 'agentlink-tool-header' });
+		header.createEl('span', { cls: 'agentlink-tool-icon', text: '🛠️' });
+
+		if (msg.metadata && 'toolCallId' in msg.metadata) {
+			const meta = msg.metadata;
+			header.createEl('span', {
+				cls: 'agentlink-tool-name',
+				text: `${meta.tool}`,
+			});
+
+			// Status badge
+			const statusBadge = header.createEl('span', {
+				cls: `agentlink-tool-status agentlink-tool-status-${meta.status}`,
+				text: meta.status,
+			});
+
+			// Parameters
+			const paramsEl = el.createDiv({ cls: 'agentlink-tool-params' });
+			paramsEl.createEl('code', {
+				text: JSON.stringify(meta.params, null, 2),
+				cls: 'agentlink-tool-params-code',
+			});
+
+			// Result if available
+			if (meta.result) {
+				const resultEl = el.createDiv({ cls: 'agentlink-tool-result' });
+				resultEl.createEl('strong', { text: 'Result:' });
+				resultEl.createEl('pre', {
+					text: meta.result.content,
+					cls: 'agentlink-tool-result-content',
+				});
+			}
+
+			// Action buttons for pending calls
+			if (meta.status === 'pending') {
+				const actionsEl = el.createDiv({ cls: 'agentlink-tool-actions' });
+				const confirmBtn = actionsEl.createEl('button', {
+					text: 'Confirm',
+					cls: 'agentlink-btn-confirm',
+				});
+				const rejectBtn = actionsEl.createEl('button', {
+					text: 'Reject',
+					cls: 'agentlink-btn-reject',
+				});
+
+				confirmBtn.addEventListener('click', () => this.handleToolConfirm(msg.id));
+				rejectBtn.addEventListener('click', () => this.handleToolReject(msg.id));
+			}
+		} else {
+			// Fallback for messages without metadata
+			el.createEl('p', { text: msg.content });
+		}
+	}
+
+	private renderFileEditContent(el: HTMLElement, msg: ChatMessage): void {
+		el.empty();
+
+		const header = el.createDiv({ cls: 'agentlink-file-edit-header' });
+		header.createEl('span', { cls: 'agentlink-file-edit-icon', text: '📝' });
+
+		if (msg.metadata && 'path' in msg.metadata) {
+			const meta = msg.metadata;
+			header.createEl('span', {
+				cls: 'agentlink-file-edit-path',
+				text: meta.path,
+			});
+
+			// Status badge
+			const statusBadge = header.createEl('span', {
+				cls: `agentlink-file-edit-status agentlink-file-edit-status-${meta.status}`,
+				text: meta.status,
+			});
+
+			// Diff view
+			const diffEl = el.createDiv({ cls: 'agentlink-file-diff' });
+
+			if (meta.original) {
+				const originalEl = diffEl.createDiv({ cls: 'agentlink-diff-original' });
+				originalEl.createEl('strong', { text: 'Original:' });
+				originalEl.createEl('pre', {
+					text: meta.original,
+					cls: 'agentlink-diff-code',
+				});
+			}
+
+			const modifiedEl = diffEl.createDiv({ cls: 'agentlink-diff-modified' });
+			modifiedEl.createEl('strong', { text: 'Modified:' });
+			modifiedEl.createEl('pre', {
+				text: meta.modified,
+				cls: 'agentlink-diff-code',
+			});
+
+			// Action buttons for pending edits
+			if (meta.status === 'pending') {
+				const actionsEl = el.createDiv({ cls: 'agentlink-file-edit-actions' });
+				const confirmBtn = actionsEl.createEl('button', {
+					text: 'Apply Changes',
+					cls: 'agentlink-btn-confirm',
+				});
+				const rejectBtn = actionsEl.createEl('button', {
+					text: 'Discard',
+					cls: 'agentlink-btn-reject',
+				});
+
+				confirmBtn.addEventListener('click', () => this.handleFileEditConfirm(msg.id));
+				rejectBtn.addEventListener('click', () => this.handleFileEditReject(msg.id));
+			}
+		} else {
+			// Fallback for messages without metadata
+			el.createEl('p', { text: msg.content });
+		}
+	}
+
+	// ── Tool Call & File Edit Handlers ───────────────────────────────────
+
+	private async handleToolConfirm(msgId: string): Promise<void> {
+		logger.debug('ChatView: tool call confirmed', msgId);
+		
+		const msg = this.session.getMessages().find(m => m.id === msgId);
+		if (!msg || !msg.metadata || !('toolCallId' in msg.metadata)) {
+			logger.error('ChatView: tool call message not found or invalid', msgId);
+			return;
+		}
+
+		const meta = msg.metadata;
+		const toolCall: ToolCall = {
+			id: meta.toolCallId,
+			tool: meta.tool,
+			params: meta.params,
+		};
+
+		// Update UI to show executing state
+		this.session.updateMessageMetadata(msgId, { ...meta, status: 'executing' });
+		this.rerenderMessage(msgId);
+
+		// Execute the tool
+		const result = await this.toolExecutor.execute(toolCall);
+
+		// Update with result
+		this.session.updateMessageMetadata(msgId, { ...meta, status: result.success ? 'completed' : 'error', result });
+		this.rerenderMessage(msgId);
+
+		// If successful, add the result to the session for context
+		if (result.success) {
+			this.session.addWorkspaceFile(meta.params.path as string);
+		}
+
+		// Send result back to agent for continuation
+		await this.sendToolResultToAgent(toolCall, result);
+	}
+
+	private async sendToolResultToAgent(toolCall: ToolCall, result: ToolResult): Promise<void> {
+		if (!this.adapter) {
+			logger.warn('ChatView: no adapter to send tool result');
+			return;
+		}
+
+		// Check if adapter supports executeTool (for direct tool execution)
+		if (this.adapter.executeTool) {
+			// Some adapters handle tool execution internally
+			// We've already executed it, so we just notify the user
+			logger.debug('ChatView: tool result available for agent', toolCall.id);
+		}
+
+		// For adapters that expect the tool result in the next message
+		// We add a system message with the result that will be included in context
+		const resultContent = typeof result.content === 'string' 
+			? result.content 
+			: JSON.stringify(result.content);
+		
+		const contextMsg = `Tool "${toolCall.tool}" result:\n${resultContent}`;
+		
+		// Add as a system message to be included in context
+		this.session.addMessage('system', contextMsg);
+		
+		// Show notification
+		new Notice(`Tool ${toolCall.tool} ${result.success ? 'completed' : 'failed'}`);
+	}
+
+	private rerenderMessage(msgId: string): void {
+		const msgEl = this.messagesEl.querySelector(`[data-msg-id="${msgId}"]`);
+		if (!msgEl) return;
+
+		const msg = this.session.getMessages().find(m => m.id === msgId);
+		if (!msg) return;
+
+		const contentEl = msgEl.querySelector('.agentlink-message-content') as HTMLElement;
+		if (!contentEl) return;
+
+		if (msg.role === 'tool_call') {
+			this.renderToolCallContent(contentEl, msg);
+		} else if (msg.role === 'file_edit') {
+			this.renderFileEditContent(contentEl, msg);
+		}
+	}
+
+	private async handleToolReject(msgId: string): Promise<void> {
+		logger.debug('ChatView: tool call rejected', msgId);
+		this.session.updateMessageMetadata(msgId, {
+			toolCallId: msgId,
+			tool: 'unknown',
+			params: {},
+			status: 'rejected',
+		});
+		// Re-render the message
+		const msgEl = this.messagesEl.querySelector(`[data-msg-id="${msgId}"]`);
+		if (msgEl) {
+			const contentEl = msgEl.querySelector('.agentlink-message-content') as HTMLElement;
+			const msg = this.session.getMessages().find(m => m.id === msgId);
+			if (msg && contentEl) {
+				this.renderToolCallContent(contentEl, msg);
+			}
+		}
+	}
+
+	private async handleFileEditConfirm(msgId: string): Promise<void> {
+		logger.debug('ChatView: file edit confirmed', msgId);
+		
+		const msg = this.session.getMessages().find(m => m.id === msgId);
+		if (!msg || !msg.metadata || !('path' in msg.metadata)) {
+			logger.error('ChatView: file edit message not found or invalid', msgId);
+			return;
+		}
+
+		const meta = msg.metadata as FileEditMetadata;
+		const { path, original, modified } = meta;
+
+		// Update UI to show executing state
+		this.session.updateMessageMetadata(msgId, { path, original, modified, status: 'executing' } as FileEditMetadata);
+		this.rerenderMessage(msgId);
+
+		// Use write_file tool to apply the changes
+		const toolCall: ToolCall = {
+			id: `edit_${Date.now()}`,
+			tool: 'write_file',
+			params: { path, content: modified },
+		};
+
+		const result = await this.toolExecutor.execute(toolCall);
+
+		// Update with result
+		const newStatus = result.success ? 'confirmed' : 'error';
+		this.session.updateMessageMetadata(msgId, { path, original, modified, status: newStatus } as FileEditMetadata);
+		this.rerenderMessage(msgId);
+
+		if (result.success) {
+			new Notice(`File changes applied to ${path}`);
+			
+			// Add system message about the edit
+			this.session.addMessage('system', `File edited: ${path}`);
+		} else {
+			new Notice(`Failed to apply changes: ${result.content}`);
+		}
+	}
+
+	private async handleFileEditReject(msgId: string): Promise<void> {
+		logger.debug('ChatView: file edit rejected', msgId);
+		
+		const msg = this.session.getMessages().find(m => m.id === msgId);
+		if (!msg || !msg.metadata || !('path' in msg.metadata)) {
+			logger.error('ChatView: file edit message not found or invalid', msgId);
+			return;
+		}
+
+		const meta = msg.metadata as FileEditMetadata;
+		this.session.updateMessageMetadata(msgId, {
+			path: meta.path,
+			original: meta.original,
+			modified: meta.modified,
+			status: 'rejected',
+		});
+		
+		// Re-render the message
+		const msgEl = this.messagesEl.querySelector(`[data-msg-id="${msgId}"]`);
+		if (msgEl) {
+			const contentEl = msgEl.querySelector('.agentlink-message-content') as HTMLElement;
+			if (contentEl) {
+				this.renderFileEditContent(contentEl, msg);
+			}
+		}
 	}
 }

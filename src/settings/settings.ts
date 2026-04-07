@@ -1,34 +1,19 @@
 /* ────────────────────────────────────────────────────────────────────────
  * Plugin settings — unified configuration for all backend types.
+ * 
+ * Supports multiple agent backend configurations.
  * ──────────────────────────────────────────────────────────────────────── */
 
-import { BackendType } from '../core/types';
+import { AgentBackendConfig, BackendType } from '../core/types';
 
 export interface AgentLinkSettings {
-	/** Which backend adapter to use. */
-	backendType: BackendType;
+	/** Currently selected backend config ID */
+	activeBackendId: string;
 
-	// ── CLI settings ──────────────────────────────────────────────────
+	/** List of all configured backends */
+	backends: AgentBackendConfig[];
 
-	/** CLI command to execute (e.g. "claude", "python"). */
-	command: string;
-	/** Arguments passed to the CLI command. */
-	args: string;
-	/** Working directory for the CLI process. */
-	cwd: string;
-	/** Environment variables as "KEY=VALUE" per line. */
-	env: string;
-
-	// ── HTTP settings ─────────────────────────────────────────────────
-
-	/** Base URL of the local HTTP agent (e.g. "http://127.0.0.1:11434/v1"). */
-	baseURL: string;
-	/** Optional API key for authenticated endpoints. */
-	apiKey: string;
-	/** Model identifier. */
-	model: string;
-
-	// ── Shared settings ───────────────────────────────────────────────
+	// ── Global settings ───────────────────────────────────────────────
 
 	/** Request timeout in milliseconds (0 = no timeout). */
 	requestTimeoutMs: number;
@@ -36,26 +21,68 @@ export interface AgentLinkSettings {
 	autoReconnect: boolean;
 	/** Enable verbose debug logging in the developer console. */
 	enableDebugLog: boolean;
-	/** System prompt sent to HTTP-based agents. */
+	/** System prompt sent to agents. */
 	systemPrompt: string;
 	/** Max characters of file content included as context. */
 	maxContextLength: number;
+
+	// ── Global Tool call settings ─────────────────────────────────────
+
+	/** Automatically confirm read-only operations (read_file, list_dir, search). */
+	autoConfirmRead: boolean;
+	/** Automatically confirm file modifications (write_file, edit_file). DANGEROUS! */
+	autoConfirmEdit: boolean;
+	/** Show agent thinking process. */
+	showThinking: boolean;
+}
+
+/** Create a default Mock backend config */
+export function createMockBackendConfig(): AgentBackendConfig {
+	return {
+		type: 'mock',
+		id: 'mock-default',
+		name: 'Mock Agent (Test)',
+	};
+}
+
+/** Create a default ACP Bridge backend config */
+export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentBackendConfig {
+	return {
+		type: 'acp-bridge',
+		id: id || `acp-${Date.now()}`,
+		name: name || 'ACP Bridge',
+		bridgeCommand: '',
+		bridgeArgs: '',
+		acpServerURL: 'http://localhost:8080',
+		workspaceRoot: '',
+		env: '',
+		timeoutMs: 120000,
+		autoConfirmTools: false,
+	};
+}
+
+/** Create a default Embedded Web backend config */
+export function createEmbeddedWebBackendConfig(id?: string, name?: string): AgentBackendConfig {
+	return {
+		type: 'embedded-web',
+		id: id || `web-${Date.now()}`,
+		name: name || 'Embedded Web',
+		webURL: 'http://localhost:3000',
+		timeoutMs: 120000,
+	};
 }
 
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
-	backendType: 'mock',
-	command: '',
-	args: '',
-	cwd: '',
-	env: '',
-	baseURL: 'http://127.0.0.1:11434/v1',
-	apiKey: '',
-	model: '',
+	activeBackendId: 'mock-default',
+	backends: [createMockBackendConfig()],
 	requestTimeoutMs: 120000,
 	autoReconnect: false,
 	enableDebugLog: false,
 	systemPrompt: '',
 	maxContextLength: 8000,
+	autoConfirmRead: true,
+	autoConfirmEdit: false,
+	showThinking: true,
 };
 
 /**
@@ -75,11 +102,57 @@ export function parseEnvString(raw: string): Record<string, string> {
 }
 
 /**
- * Parse the "args" setting (space-separated) into an array.
+ * Parse bridge args from string to array.
  */
-export function parseArgsString(raw: string): string[] {
+export function parseBridgeArgs(raw: string): string[] {
+	if (!raw.trim()) return [];
 	return raw
 		.trim()
 		.split(/\s+/)
 		.filter(Boolean);
+}
+
+/**
+ * Find a backend config by ID.
+ */
+export function findBackendConfig(settings: AgentLinkSettings, id: string): AgentBackendConfig | undefined {
+	return settings.backends.find(b => b.id === id);
+}
+
+/**
+ * Get the active backend config.
+ */
+export function getActiveBackendConfig(settings: AgentLinkSettings): AgentBackendConfig | undefined {
+	return findBackendConfig(settings, settings.activeBackendId);
+}
+
+/**
+ * Get human-readable label for backend type.
+ */
+export function getBackendTypeLabel(type: BackendType): string {
+	switch (type) {
+		case 'mock':
+			return 'Mock Agent';
+		case 'acp-bridge':
+			return 'ACP Bridge';
+		case 'embedded-web':
+			return 'Embedded Web';
+		default:
+			return 'Unknown';
+	}
+}
+
+/**
+ * Validate backend config ID (must be unique, alphanumeric with dashes/underscores).
+ */
+export function isValidBackendId(id: string): boolean {
+	return /^[a-zA-Z0-9_-]+$/.test(id) && id.length > 0;
+}
+
+/**
+ * Generate a unique backend ID.
+ */
+export function generateBackendId(type: BackendType): string {
+	const prefix = type === 'acp-bridge' ? 'acp' : type === 'embedded-web' ? 'web' : 'backend';
+	return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }

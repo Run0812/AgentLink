@@ -6,7 +6,7 @@
  * AbortController and configurable timeouts.
  * ──────────────────────────────────────────────────────────────────────── */
 
-import { AgentAdapter, AgentInput, AgentStatus, AgentStatusState, StreamHandlers } from '../core/types';
+import { AgentAdapter, AgentCapability, AgentInput, AgentStatus, AgentStatusState, StreamHandlers } from '../core/types';
 import { CancellationError, ConnectionError, HttpError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
 import { parseSSEChunk } from '../services/stream-parser';
@@ -214,6 +214,12 @@ export class HttpAdapter implements AgentAdapter {
 
 	getStatus(): AgentStatus {
 		return { state: this.state };
+	}
+
+	getCapabilities(): AgentCapability[] {
+		// HTTP adapter typically only supports chat
+		// Tool calling would require specific API support
+		return ['chat'];
 	}
 
 	// ── Helpers ────────────────────────────────────────────────────────
