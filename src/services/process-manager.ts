@@ -23,12 +23,13 @@ export class ProcessManager {
 		}
 	}
 
-	/** Kill a specific process by PID. */
+	/** Kill a specific process by PID. Sends SIGTERM first, then SIGKILL after 2 s grace period. */
 	kill(pid: number): void {
 		const child = this.processes.get(pid);
 		if (child && !child.killed) {
 			logger.debug('ProcessManager: killing PID', pid);
 			child.kill('SIGTERM');
+			// Allow 2 seconds for graceful shutdown before force-killing
 			setTimeout(() => {
 				try {
 					process.kill(pid, 0);

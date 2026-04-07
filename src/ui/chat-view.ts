@@ -24,6 +24,9 @@ export class ChatView extends ItemView {
 	private settings: AgentLinkSettings;
 	private isBusy = false;
 
+	// Maximum number of recent messages to include as conversation context
+	private static readonly MAX_CONTEXT_MESSAGES = 20;
+
 	// ── Saved callbacks so we can call plugin methods ──────────────────
 	private onSettingsRead: () => AgentLinkSettings;
 
@@ -214,7 +217,7 @@ export class ChatView extends ItemView {
 		const input: AgentInput = {
 			prompt,
 			context: { fileContent, selectedText },
-			history: this.session.getRecentMessages(20).slice(0, -1), // exclude the just-added placeholder
+			history: this.session.getRecentMessages(ChatView.MAX_CONTEXT_MESSAGES).slice(0, -1), // exclude the just-added placeholder
 		};
 
 		let accumulated = '';

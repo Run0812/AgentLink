@@ -9,6 +9,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { AgentAdapter, AgentInput, AgentStatus, AgentStatusState, StreamHandlers } from '../core/types';
 import { CancellationError, CommandNotFoundError, ProcessExitError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
+import { ProcessManager } from '../services/process-manager';
 
 export interface CliAdapterConfig {
 	command: string;
@@ -26,6 +27,7 @@ export class CliAdapter implements AgentAdapter {
 	private state: AgentStatusState = 'disconnected';
 	private child: ChildProcess | null = null;
 	private timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+	private processManager = new ProcessManager();
 
 	constructor(config: CliAdapterConfig) {
 		this.config = config;
@@ -82,6 +84,7 @@ export class CliAdapter implements AgentAdapter {
 					env: { ...process.env, ...env },
 					stdio: ['pipe', 'pipe', 'pipe'],
 				});
+				this.processManager.track(this.child);
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				if (msg.includes('ENOENT')) {
@@ -151,21 +154,10 @@ export class CliAdapter implements AgentAdapter {
 	// ── Helpers ────────────────────────────────────────────────────────
 
 	private killChild(): void {
-		if (this.child && !this.child.killed) {
-			logger.debug('CliAdapter: killing child process', this.child.pid);
-			this.child.kill('SIGTERM');
-			// Force kill after 2 s if still alive
-			const pid = this.child.pid;
-			setTimeout(() => {
-				try {
-					if (pid) process.kill(pid, 0); // check if alive
-					if (pid) process.kill(pid, 'SIGKILL');
-				} catch {
-					// already exited
-				}
-			}, 2000);
-			this.child = null;
+		if (this.child?.pid !== undefined) {
+			this.processManager.kill(this.child.pid);
 		}
+		this.child = null;
 	}
 
 	private clearTimeout(): void {
