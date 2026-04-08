@@ -1,7 +1,182 @@
 # AgentLink 开发进展记录
 
-> 最后更新: 2026-04-07
-> 更新内容: Phase 3 ACP Bridge Mode 完整实现
+> 最后更新: 2026-04-08
+> 更新内容: UI 布局重构 - Terminal 风格头部
+
+---
+
+### 2026-04-08 - Terminal 风格 UI 重构 ✅
+
+**布局变更**（模仿 Terminal.app 风格）：
+
+- ✅ **两行紧凑头部设计**
+  - Row 1: 🤖 AgentLink | [●] BackendName | 📜 💬 🗑️
+  - Row 2: Session Title（灰色背景，可点击编辑）
+  - 更紧凑的 padding 和字体大小
+
+- ✅ **状态指示灯（HDD 灯风格）**
+  - 🟢 绿色 (#4ade80): 已连接
+  - 🔴 红色 (#f87171): 已断开
+  - 🟡 黄色闪烁 (#fbbf24): 正在生成
+  - 7px 圆形 LED，带发光效果
+
+- ✅ **输入区布局**
+  - 输入框在左（flex: 1）
+  - Send/Stop 按钮在右侧垂直堆叠
+  - 按钮尺寸更小（1.4rem 高）
+  - 整体更紧凑
+
+- ✅ **操作按钮优化**
+  - 按钮仅显示图标，无文字
+  - 悬停时透明度变化
+  - 更小的点击区域
+
+**文件变更**:
+- `src/ui/chat-view.ts`:
+  - 重写 `buildUI()`: Terminal 风格两行头部
+  - 修改 `setBusy()`: 控制黄色 LED 闪烁
+  - 修改 `refreshStatus()`: 更新 LED 颜色
+  - 添加 `statusLed` DOM 引用
+
+---
+
+### 2026-04-08 - UI 优化 ✅
+
+**修复问题**:
+- ✅ **精简状态显示**
+  - 简化前: `🌙 Kimi Code (ACP) (ACP Bridge) - disconnected [Chat, Read Files, Write Files, Edit Files, Terminal Commands]`
+  - 简化后: `🌙 Kimi Code (ACP) • disconnected`
+  - 移除了冗余的后端类型和 capabilities 列表
+  - 现在只显示配置文件名和连接状态
+
+- ✅ **History chat 改为下拉栏样式**
+  - 从模态框改为内联下拉菜单
+  - 点击 📜 按钮显示下拉列表
+  - 包含 "+ New Chat" 按钮和所有历史会话
+  - 当前会话高亮显示
+  - 点击外部自动关闭
+
+- ✅ **New Chat 防止重复创建**
+  - 如果当前会话已经是空的（无消息），点击 💬 不再创建新会话
+  - 直接聚焦输入框，避免重复空会话
+
+- ✅ **Agent 显示使用配置文件名**
+  - 显示用户配置的 name（如 "🌙 Kimi Code (ACP)"）
+  - 不再显示内部类型 "ACP Bridge"
+
+- ✅ **Generating 显示移到对话列表**
+  - 从底部状态栏移到消息列表底部
+  - 显示为带旋转动画的 "◐ Generating…" 指示器
+  - 生成完成后自动消失
+
+- ✅ **Send 按钮移到输入框下方**
+  - 从并排改为垂直布局
+  - 输入框在上，Send/Stop 按钮在下
+  - 更符合聊天应用的使用习惯
+
+**文件变更**:
+- `src/ui/chat-view.ts`:
+  - 修改 `refreshStatus()`: 精简状态显示
+  - 修改 `buildUI()`: 重新布局 header 和 input area
+  - 修改 `setBusy()`: 将 Generating 指示器移到消息列表
+  - 添加 `renderHistoryDropdown()`: 下拉菜单渲染
+  - 修改 `createNewSession()`: 防止重复创建空会话
+
+---
+
+### 2026-04-08 - 历史对话管理功能 ✅
+
+**新增功能**:
+- ✅ **SessionManager 服务**
+  - 创建 `src/services/session-manager.ts`
+  - 支持会话的创建、保存、加载、删除
+  - 使用 Obsidian 插件数据存储持久化（`loadData`/`saveData`）
+  - 自动限制最多保存 50 个会话，自动清理旧会话
+  - 自动生成会话标题（基于第一条用户消息）
+
+- ✅ **标题栏优化**
+  - 新布局：🤖 AgentLink | [会话标题] | 📜 💬 🗑️
+  - 会话标题可点击重命名
+  - 📜 历史记录按钮：打开会话列表模态框
+  - 💬 新建会话按钮：创建空白会话
+  - 🗑️ 清空按钮：清空当前会话（保留历史）
+  - 底部显示后端连接状态
+
+- ✅ **历史对话列表 UI**
+  - 模态框显示所有历史会话
+  - 按更新时间倒序排列
+  - 显示会话标题、时间、消息数量
+  - 当前会话高亮标记
+  - 支持加载和删除操作
+  - 底部有 "+ New Chat" 按钮
+
+- ✅ **对话标题管理**
+  - 自动生成：基于第一条用户消息前 30 字符
+  - 手动重命名：点击标题打开重命名对话框
+  - 重命名对话框支持 Enter 确认、Esc 取消
+
+- ✅ **自动保存机制**
+  - 每条消息发送后自动保存会话
+  - 会话状态与后端配置关联
+
+**文件变更**:
+- `src/services/session-manager.ts`: 新增会话管理服务
+- `src/main.ts`: 
+  - 集成 SessionManager
+  - 在 plugin 类中添加 `sessionManager` 属性
+  - 在 `onload` 中初始化 SessionManager
+- `src/ui/chat-view.ts`:
+  - 添加 SessionManager 导入和属性
+  - 修改构造函数接收 SessionManager
+  - 重写 `buildUI()` 创建新标题栏布局
+  - 添加会话管理方法：`initializeSession()`, `createNewSession()`, `loadSession()`
+  - 添加标题管理：`updateSessionTitle()`, `renameCurrentSession()`, `promptForTitle()`
+  - 添加历史列表：`openSessionList()`, `renderSessionListItem()`
+  - 添加删除确认：`confirmDelete()`
+  - 添加自动保存：`saveCurrentSession()`
+
+---
+
+### 2026-04-08 - ACP 交互体验优化 ✅
+
+**修复问题**:
+- ✅ **Thinking 显示位置修复**
+  - 修复了 thinking 内容显示在回答下方的问题
+  - 现在 thinking 显示在 assistant 回答上方（符合 RPD 规范）
+  - 实现方式：延迟创建 assistant DOM 元素，直到收到第一个 chunk
+  - 如果先收到 thinking，会先渲染 thinking，再在其后渲染 assistant
+
+- ✅ **Thinking Markdown 渲染支持**
+  - thinking 内容现在支持完整的 Markdown 渲染
+  - 使用 `MarkdownRenderer.render()` 渲染 thinking body 内容
+  - 支持代码块、列表、链接等 Markdown 语法
+
+- ✅ **Tool Use 卡片化显示**
+  - 新增 `onToolCall` 回调到 `StreamHandlers` 接口
+  - ACP adapter 现在通过 `onToolCall` 而非 `onChunk` 报告 tool use
+  - Tool use 显示为卡片格式（而非 JSON 代码块）
+  - 卡片显示工具名称、参数、执行状态
+
+**文件变更**:
+- `src/core/types.ts`: 添加 `onToolCall` 回调到 `StreamHandlers`
+- `src/adapters/acp-bridge-adapter.ts`: 修改 `handleToolCall()` 使用新回调
+- `src/ui/chat-view.ts`: 
+  - 修改 `handleSend()` 延迟渲染 assistant 消息
+  - 添加 `onToolCall` 处理逻辑
+  - 添加 `generateId` 导入
+
+### 2026-04-08 - 设置面板清理 ✅
+
+**移除无意义配置**:
+- ✅ **移除 Max Context Length 设置项**
+  - 该配置用于限制文件内容长度，但在当前 ACP 架构下意义不大
+  - 移除后，文件内容将完整发送（由后端自行处理截断）
+  - 简化设置面板，减少用户困惑
+
+**文件变更**:
+- `src/settings/settings.ts`: 移除 `maxContextLength` 字段
+- `src/settings/settings-tab.ts`: 移除 Max Context Length 设置 UI
+- `src/ui/chat-view.ts`: 移除文件内容截断逻辑
 
 ---
 
@@ -13,8 +188,8 @@
 | Phase 1 - 核心类型与接口定义 | ✅ 已完成 | 100% |
 | Phase 2 - 工具调用机制 | ✅ 已完成 | 100% |
 | **Phase 3 - ACP Bridge Mode** | ✅ **已完成** | **100%** |
-| Phase 4 - Embedded Web Mode | 🟡 骨架完成 | 15% |
-| Phase 5 - 工程加固与发布 | ❌ 未开始 | 0% |
+| Phase 4 - 历史对话保存功能 | ✅ **已完成** | **100%** |
+| Phase 5 - 工程加固与发布 | 🟡 **进行中** | **20%** |
 
 ---
 

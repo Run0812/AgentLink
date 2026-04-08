@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "obsidian": {
+      "source": "gapmiss/obsidian-plugin-skill",
+      "sourceType": "github",
+      "computedHash": "df4a987ac6f63985f0ebc982263199a9536f550a05d943beb642b2c2b3a8ff6b"
+    },
     "obsidian-bases": {
       "source": "git@github.com:kepano/obsidian-skills.git",
       "sourceType": "git",

@@ -362,19 +362,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName('Max Context Length (characters)')
-			.setDesc('Maximum characters of file content included as context.')
-			.addText((t) =>
-				t.setValue(String(this.plugin.settings.maxContextLength)).onChange(async (v) => {
-					const n = parseInt(v, 10);
-					if (!isNaN(n) && n > 0) {
-						this.plugin.settings.maxContextLength = n;
-						await this.plugin.saveSettings();
-					}
-				})
-			);
-
-		new Setting(containerEl)
 			.setName('Auto-reconnect')
 			.setDesc('Automatically reconnect when the backend connection is lost.')
 			.addToggle(

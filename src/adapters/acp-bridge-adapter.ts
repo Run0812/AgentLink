@@ -537,14 +537,49 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	handleToolCall(update: acp.ToolCallUpdate): void {
-		console.log('[ACP Adapter] handleToolCall:', update.toolCallId, update.title, update.status);
-		// Don't output raw JSON to the response - tool calls are handled separately via UI
-		// If needed, we can format a simplified message here
-		if (update.status === 'in_progress') {
-			const toolMsg = `🔍 **${update.title}**...\n\n`;
-			this.responseBuffer.push(toolMsg);
-			if (this.currentHandlers) {
-				this.currentHandlers.onChunk(toolMsg);
+		console.log('[ACP Adapter] handleToolCall:', (update as any).toolCallId, (update as any).title, (update as any).status);
+		
+		// Map ACP status to our status type
+		let status: 'pending' | 'executing' | 'completed' | 'error';
+		switch ((update as any).status) {
+			case 'in_progress':
+				status = 'executing';
+				break;
+			case 'completed':
+				status = 'completed';
+				break;
+			case 'failed':
+				status = 'error';
+				break;
+			default:
+				status = 'pending';
+		}
+		
+		// Try to parse params from the update
+		let params: Record<string, unknown> = {};
+		const updateAny = update as any;
+		if (updateAny.arguments || updateAny.params) {
+			const rawParams = updateAny.arguments || updateAny.params;
+			try {
+				params = typeof rawParams === 'string' 
+					? JSON.parse(rawParams) 
+					: rawParams;
+			} catch {
+				params = { raw: rawParams };
+			}
+		}
+		
+		// Call the handler to display as a card in UI
+		if (this.currentHandlers?.onToolCall) {
+			this.currentHandlers.onToolCall(updateAny.tool || updateAny.toolName || 'unknown', params, status);
+		} else {
+			// Fallback: show as text if no card handler
+			if ((update as any).status === 'in_progress') {
+				const toolMsg = `🔍 **${(update as any).title}**...\n\n`;
+				this.responseBuffer.push(toolMsg);
+				if (this.currentHandlers) {
+					this.currentHandlers.onChunk(toolMsg);
+				}
 			}
 		}
 	}

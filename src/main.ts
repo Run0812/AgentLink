@@ -20,15 +20,22 @@ import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { MockAdapter } from './adapters/mock-adapter';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
 import { parseEnvString, parseBridgeArgs } from './settings/settings';
+import { SessionManager } from './services/session-manager';
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
 	private adapter: AgentAdapter | null = null;
+	sessionManager!: SessionManager;
 
 	// ── Lifecycle ──────────────────────────────────────────────────────
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+		
+		// Initialize SessionManager
+		this.sessionManager = new SessionManager(this);
+		await this.sessionManager.initialize();
+		
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
 
@@ -36,7 +43,7 @@ export default class AgentLinkPlugin extends Plugin {
 
 		// Register the custom sidebar view
 		this.registerView(AGENTLINK_VIEW_TYPE, (leaf) => {
-			const view = new ChatView(leaf, this.settings, () => this.settings);
+			const view = new ChatView(leaf, this.settings, () => this.settings, this.sessionManager);
 			if (this.adapter) view.setAdapter(this.adapter);
 			return view;
 		});

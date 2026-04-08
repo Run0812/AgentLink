@@ -23,8 +23,6 @@ export interface AgentLinkSettings {
 	enableDebugLog: boolean;
 	/** System prompt sent to agents. */
 	systemPrompt: string;
-	/** Max characters of file content included as context. */
-	maxContextLength: number;
 
 	// ── Global Tool call settings ─────────────────────────────────────
 
@@ -87,7 +85,6 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
 	autoReconnect: false,
 	enableDebugLog: false,
 	systemPrompt: '',
-	maxContextLength: 8000,
 	autoConfirmRead: true,
 	autoConfirmEdit: false,
 	showThinking: true,

@@ -9,13 +9,14 @@
  *   - Wire up to a SessionStore for history
  * ──────────────────────────────────────────────────────────────────────── */
 
-import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata } from '../core/types';
+import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId } from '../core/types';
 import { CancellationError } from '../core/errors';
 import { logger } from '../core/logger';
 import { SessionStore } from '../services/session-store';
 import { ToolExecutor, ToolExecutorConfig } from '../services/tool-executor';
 import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '../settings/settings';
+import { SessionManager, SessionMetadata } from '../services/session-manager';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -24,6 +25,8 @@ export class ChatView extends ItemView {
 	private session = new SessionStore();
 	private settings: AgentLinkSettings;
 	private isBusy = false;
+	private sessionManager: SessionManager;
+	private currentSessionId: string | null = null;
 
 	// Maximum number of recent messages to include as conversation context
 	private static readonly MAX_CONTEXT_MESSAGES = 20;
@@ -42,6 +45,13 @@ export class ChatView extends ItemView {
 	private clearBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
 	private backendLabel!: HTMLElement;
+	
+	// ── Header DOM references ──────────────────────────────────────────
+	private headerEl!: HTMLElement;
+	private sessionTitleEl!: HTMLElement;
+	private historyBtn!: HTMLButtonElement;
+	private newSessionBtn!: HTMLButtonElement;
+	private statusLed!: HTMLElement;
 
 	// ── Streaming state ────────────────────────────────────────────────
 	private streamingMsgId: string | null = null;
@@ -51,10 +61,12 @@ export class ChatView extends ItemView {
 		leaf: WorkspaceLeaf,
 		settings: AgentLinkSettings,
 		onSettingsRead: () => AgentLinkSettings,
+		sessionManager: SessionManager,
 	) {
 		super(leaf);
 		this.settings = settings;
 		this.onSettingsRead = onSettingsRead;
+		this.sessionManager = sessionManager;
 		
 		// Initialize ToolExecutor with default config
 		const toolConfig: ToolExecutorConfig = {
@@ -127,35 +139,133 @@ export class ChatView extends ItemView {
 	// ── UI construction ────────────────────────────────────────────────
 
 	private buildUI(container: HTMLElement): void {
-		// Header
-		const header = container.createDiv({ cls: 'agentlink-header' });
-		header.createEl('span', { cls: 'agentlink-title', text: 'AgentLink' });
-
-		const controls = header.createDiv({ cls: 'agentlink-header-controls' });
-
-		this.backendLabel = controls.createEl('span', {
-			cls: 'agentlink-backend-label',
+		// Header with compact two-row layout (inspired by Terminal.app)
+		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
+		
+		// Row 1: AgentLink | Status LED + Backend | Actions
+		const headerRow1 = this.headerEl.createDiv({ cls: 'agentlink-header-row1' });
+		headerRow1.style.display = 'flex';
+		headerRow1.style.alignItems = 'center';
+		headerRow1.style.justifyContent = 'space-between';
+		headerRow1.style.padding = '0.4rem 0.6rem';
+		headerRow1.style.borderBottom = '1px solid var(--background-modifier-border)';
+		
+		// Left: AgentLink brand
+		const leftSection = headerRow1.createDiv();
+		leftSection.style.display = 'flex';
+		leftSection.style.alignItems = 'center';
+		leftSection.style.gap = '0.4rem';
+		leftSection.createEl('span', { text: '🤖' });
+		leftSection.createEl('span', { text: 'AgentLink', cls: 'agentlink-brand' });
+		
+		// Center: Status LED + Backend name
+		const centerSection = headerRow1.createDiv();
+		centerSection.style.display = 'flex';
+		centerSection.style.alignItems = 'center';
+		centerSection.style.gap = '0.4rem';
+		
+		// Status LED (HDD indicator style)
+		this.statusLed = centerSection.createEl('span');
+		this.statusLed.style.width = '7px';
+		this.statusLed.style.height = '7px';
+		this.statusLed.style.borderRadius = '50%';
+		this.statusLed.style.background = '#6b7280';
+		this.statusLed.style.transition = 'all 0.15s ease';
+		
+		// Backend name
+		this.backendLabel = centerSection.createEl('span');
+		this.backendLabel.style.fontSize = '0.85rem';
+		this.backendLabel.style.color = 'var(--text-muted)';
+		
+		// Right: Action buttons (minimal)
+		const rightSection = headerRow1.createDiv();
+		rightSection.style.display = 'flex';
+		rightSection.style.alignItems = 'center';
+		rightSection.style.gap = '0.1rem';
+		
+		// History dropdown button
+		const historyContainer = rightSection.createDiv();
+		historyContainer.style.position = 'relative';
+		this.historyBtn = historyContainer.createEl('button');
+		this.historyBtn.innerHTML = '📜';
+		this.historyBtn.style.padding = '0.3rem 0.4rem';
+		this.historyBtn.style.background = 'transparent';
+		this.historyBtn.style.border = 'none';
+		this.historyBtn.style.cursor = 'pointer';
+		this.historyBtn.style.fontSize = '0.95rem';
+		this.historyBtn.style.opacity = '0.7';
+		this.historyBtn.addEventListener('mouseenter', () => this.historyBtn.style.opacity = '1');
+		this.historyBtn.addEventListener('mouseleave', () => this.historyBtn.style.opacity = '0.7');
+		
+		const historyDropdown = historyContainer.createDiv();
+		historyDropdown.style.display = 'none';
+		this.historyBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isOpen = historyDropdown.style.display !== 'none';
+			historyDropdown.style.display = isOpen ? 'none' : 'block';
+			if (!isOpen) this.renderHistoryDropdown(historyDropdown);
 		});
-
-		this.clearBtn = controls.createEl('button', {
-			cls: 'agentlink-clear-btn',
-			text: 'Clear',
-		});
-		this.clearBtn.setAttribute('aria-label', 'Clear conversation');
+		document.addEventListener('click', () => historyDropdown.style.display = 'none');
+		
+		// New chat button
+		this.newSessionBtn = rightSection.createEl('button');
+		this.newSessionBtn.innerHTML = '💬';
+		this.newSessionBtn.style.padding = '0.3rem 0.4rem';
+		this.newSessionBtn.style.background = 'transparent';
+		this.newSessionBtn.style.border = 'none';
+		this.newSessionBtn.style.cursor = 'pointer';
+		this.newSessionBtn.style.fontSize = '0.95rem';
+		this.newSessionBtn.style.opacity = '0.7';
+		this.newSessionBtn.addEventListener('mouseenter', () => this.newSessionBtn.style.opacity = '1');
+		this.newSessionBtn.addEventListener('mouseleave', () => this.newSessionBtn.style.opacity = '0.7');
+		this.newSessionBtn.addEventListener('click', () => this.createNewSession());
+		
+		// Clear button
+		this.clearBtn = rightSection.createEl('button');
+		this.clearBtn.innerHTML = '🗑️';
+		this.clearBtn.style.padding = '0.3rem 0.4rem';
+		this.clearBtn.style.background = 'transparent';
+		this.clearBtn.style.border = 'none';
+		this.clearBtn.style.cursor = 'pointer';
+		this.clearBtn.style.fontSize = '0.95rem';
+		this.clearBtn.style.opacity = '0.7';
+		this.clearBtn.addEventListener('mouseenter', () => this.clearBtn.style.opacity = '1');
+		this.clearBtn.addEventListener('mouseleave', () => this.clearBtn.style.opacity = '0.7');
 		this.clearBtn.addEventListener('click', () => this.clearConversation());
-
+		
+		// Row 2: Session title (editable, secondary)
+		const headerRow2 = this.headerEl.createDiv();
+		headerRow2.style.padding = '0.25rem 0.6rem';
+		headerRow2.style.background = 'var(--background-secondary)';
+		headerRow2.style.borderBottom = '1px solid var(--background-modifier-border)';
+		
+		this.sessionTitleEl = headerRow2.createEl('span', { text: 'New Chat' });
+		this.sessionTitleEl.style.fontSize = '0.8rem';
+		this.sessionTitleEl.style.color = 'var(--text-muted)';
+		this.sessionTitleEl.style.cursor = 'pointer';
+		this.sessionTitleEl.addEventListener('click', () => this.renameCurrentSession());
+		
 		// Messages area
 		this.messagesEl = container.createDiv({ cls: 'agentlink-messages' });
-		this.renderWelcome();
+		this.initializeSession();
 
-		// Input area
-		const inputArea = container.createDiv({ cls: 'agentlink-input-area' });
+		// Input area with buttons on right side
+		const inputArea = container.createDiv();
+		inputArea.style.display = 'flex';
+		inputArea.style.gap = '0.5rem';
+		inputArea.style.padding = '0.6rem';
+		inputArea.style.borderTop = '1px solid var(--background-modifier-border)';
 
-		this.inputEl = inputArea.createEl('textarea', {
-			cls: 'agentlink-input',
-			placeholder: 'Ask your AI agent…',
-		});
-		this.inputEl.rows = 3;
+		this.inputEl = inputArea.createEl('textarea', { placeholder: 'Ask your AI agent…' });
+		this.inputEl.style.flex = '1';
+		this.inputEl.style.height = '2.8rem';
+		this.inputEl.style.minHeight = '2.8rem';
+		this.inputEl.style.resize = 'none';
+		this.inputEl.style.padding = '0.5rem 0.6rem';
+		this.inputEl.style.border = '1px solid var(--background-modifier-border)';
+		this.inputEl.style.borderRadius = '6px';
+		this.inputEl.style.background = 'var(--background-primary)';
+		this.inputEl.style.fontSize = '0.9rem';
 		this.inputEl.addEventListener('keydown', (evt) => {
 			if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
 				evt.preventDefault();
@@ -163,25 +273,46 @@ export class ChatView extends ItemView {
 			}
 		});
 
-		const btnGroup = inputArea.createDiv({ cls: 'agentlink-btn-group' });
+		const btnCol = inputArea.createDiv();
+		btnCol.style.display = 'flex';
+		btnCol.style.flexDirection = 'column';
+		btnCol.style.gap = '0.25rem';
 
-		this.sendBtn = btnGroup.createEl('button', {
-			cls: 'agentlink-send-btn',
-			text: 'Send',
-		});
-		this.sendBtn.setAttribute('aria-label', 'Send message (Ctrl+Enter)');
+		this.sendBtn = btnCol.createEl('button', { text: 'Send' });
+		this.sendBtn.style.padding = '0 0.9rem';
+		this.sendBtn.style.height = '1.4rem';
+		this.sendBtn.style.background = 'var(--interactive-accent)';
+		this.sendBtn.style.color = 'var(--text-on-accent)';
+		this.sendBtn.style.border = 'none';
+		this.sendBtn.style.borderRadius = '4px';
+		this.sendBtn.style.cursor = 'pointer';
+		this.sendBtn.style.fontSize = '0.75rem';
 		this.sendBtn.addEventListener('click', () => this.handleSend());
 
-		this.stopBtn = btnGroup.createEl('button', {
-			cls: 'agentlink-stop-btn',
-			text: 'Stop',
-		});
-		this.stopBtn.setAttribute('aria-label', 'Stop generation');
+		this.stopBtn = btnCol.createEl('button', { text: 'Stop' });
+		this.stopBtn.style.padding = '0 0.9rem';
+		this.stopBtn.style.height = '1.4rem';
+		this.stopBtn.style.background = 'var(--background-modifier-error)';
+		this.stopBtn.style.color = 'var(--text-on-accent)';
+		this.stopBtn.style.border = 'none';
+		this.stopBtn.style.borderRadius = '4px';
+		this.stopBtn.style.cursor = 'pointer';
+		this.stopBtn.style.fontSize = '0.75rem';
 		this.stopBtn.style.display = 'none';
 		this.stopBtn.addEventListener('click', () => this.handleStop());
 
-		// Status bar
-		this.statusEl = container.createDiv({ cls: 'agentlink-status' });
+		// Add animation styles
+		if (!document.getElementById('agentlink-animations')) {
+			const style = document.createElement('style');
+			style.id = 'agentlink-animations';
+			style.textContent = `
+				@keyframes agentlink-led-blink {
+					0%, 100% { opacity: 1; }
+					50% { opacity: 0.3; }
+				}
+			`;
+			document.head.appendChild(style);
+		}
 
 		this.refreshStatus();
 	}
@@ -223,12 +354,11 @@ export class ChatView extends ItemView {
 		if (!selectedText) {
 			const file = this.app.workspace.getActiveFile();
 			if (file) {
-				try {
-					const raw = await this.app.vault.read(file);
-					fileContent = raw.slice(0, this.settings.maxContextLength);
-				} catch {
-					// ignore
-				}
+			try {
+				fileContent = await this.app.vault.read(file);
+			} catch {
+				// ignore
+			}
 			}
 		}
 
@@ -506,30 +636,43 @@ export class ChatView extends ItemView {
 		this.sendBtn.disabled = busy;
 		this.sendBtn.style.display = busy ? 'none' : '';
 		this.stopBtn.style.display = busy ? '' : 'none';
-		this.statusEl.setText(busy ? 'Generating…' : '');
-		if (busy) {
-			this.statusEl.addClass('agentlink-status-loading');
-		} else {
-			this.statusEl.removeClass('agentlink-status-loading');
+		
+		// Update status LED to yellow blinking when generating
+		if (this.statusLed) {
+			if (busy) {
+				this.statusLed.style.background = '#fbbf24';
+				this.statusLed.style.animation = 'agentlink-led-blink 0.6s ease-in-out infinite';
+				this.statusLed.style.boxShadow = '0 0 4px #fbbf24';
+			} else {
+				// Reset to connection state
+				this.refreshStatus();
+			}
 		}
-		this.refreshStatus();
 	}
 
 	private refreshStatus(): void {
-		if (!this.backendLabel) return;
+		if (!this.backendLabel || !this.statusLed) return;
 
 		const activeBackend = getActiveBackendConfig(this.settings);
-		const adapterLabel = this.adapter?.label ?? 'None';
 		const statusState = this.adapter?.getStatus().state ?? 'disconnected';
-		const capabilities = this.adapter?.getCapabilities() ?? [];
-		const capsText = capabilities.length > 0
-			? ` [${capabilities.map(c => CAPABILITY_LABELS[c]).join(', ')}]`
-			: '';
-
 		const backendName = activeBackend?.name ?? 'None';
-		const backendType = activeBackend ? getBackendTypeLabel(activeBackend.type) : '';
 
-		this.backendLabel.setText(`${backendName} (${backendType}) - ${statusState}${capsText}`);
+		this.backendLabel.setText(backendName);
+		
+		// Update LED color based on connection state
+		if (statusState === 'connected') {
+			this.statusLed.style.background = '#4ade80';
+			this.statusLed.style.animation = 'none';
+			this.statusLed.style.boxShadow = '0 0 3px #4ade80';
+		} else if (statusState === 'disconnected') {
+			this.statusLed.style.background = '#f87171';
+			this.statusLed.style.animation = 'none';
+			this.statusLed.style.boxShadow = '0 0 3px #f87171';
+		} else {
+			this.statusLed.style.background = '#6b7280';
+			this.statusLed.style.animation = 'none';
+			this.statusLed.style.boxShadow = 'none';
+		}
 	}
 
 	private scrollToBottom(): void {
@@ -820,6 +963,357 @@ export class ChatView extends ItemView {
 			if (contentEl) {
 				this.renderFileEditContent(contentEl, msg);
 			}
+		}
+	}
+
+	// ── Session Management ───────────────────────────────────────────────
+
+	/** Initialize session on open - load existing or create new */
+	private initializeSession(): void {
+		// Try to get current session from manager
+		const currentSession = this.sessionManager.getCurrentSession();
+		if (currentSession && currentSession.messages.length > 0) {
+			this.loadSession(currentSession.id);
+		} else {
+			// Create new session
+			this.createNewSession();
+		}
+	}
+
+	/** Create a new session */
+	private createNewSession(): void {
+		// Prevent creating duplicate empty sessions
+		if (this.currentSessionId) {
+			const currentSession = this.sessionManager.getSession(this.currentSessionId);
+			if (currentSession && currentSession.messages.length === 0) {
+				// Current session is already empty, just focus it
+				this.inputEl?.focus();
+				return;
+			}
+		}
+		
+		const session = this.sessionManager.createSession();
+		this.currentSessionId = session.id;
+		this.session.clear();
+		this.messagesEl.empty();
+		this.renderWelcome();
+		this.updateSessionTitle(session.title);
+		this.refreshStatus();
+		this.inputEl?.focus();
+	}
+
+	/** Load a session by ID */
+	private loadSession(sessionId: string): void {
+		const session = this.sessionManager.getSession(sessionId);
+		if (!session) return;
+
+		this.currentSessionId = sessionId;
+		this.sessionManager.setCurrentSession(sessionId);
+		this.session.clear();
+		this.messagesEl.empty();
+
+		// Load messages
+		for (const msg of session.messages) {
+			this.session.addMessage(msg.role, msg.content, msg.metadata);
+			this.renderMessage(msg);
+		}
+
+		this.updateSessionTitle(session.title);
+		this.refreshStatus();
+	}
+
+	/** Update the session title in UI */
+	private updateSessionTitle(title: string): void {
+		if (this.sessionTitleEl) {
+			this.sessionTitleEl.setText(title);
+		}
+	}
+
+	/** Rename current session */
+	private async renameCurrentSession(): Promise<void> {
+		if (!this.currentSessionId) return;
+
+		const currentTitle = this.sessionTitleEl.getText();
+		const newTitle = await this.promptForTitle(currentTitle);
+		
+		if (newTitle && newTitle !== currentTitle) {
+			await this.sessionManager.renameSession(this.currentSessionId, newTitle);
+			this.updateSessionTitle(newTitle);
+			new Notice('Session renamed');
+		}
+	}
+
+	/** Prompt user for session title */
+	private promptForTitle(currentTitle: string): Promise<string | null> {
+		return new Promise((resolve) => {
+			const modal = new Modal(this.app);
+			modal.titleEl.setText('Rename Session');
+			
+			const inputContainer = modal.contentEl.createDiv();
+			const input = inputContainer.createEl('input', {
+				type: 'text',
+				value: currentTitle,
+				cls: 'agentlink-rename-input',
+			});
+			input.style.width = '100%';
+			input.focus();
+			input.select();
+			
+			const btnContainer = modal.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
+			btnContainer.style.display = 'flex';
+			btnContainer.style.gap = '0.5em';
+			btnContainer.style.marginTop = '1em';
+			btnContainer.style.justifyContent = 'flex-end';
+			
+			new ButtonComponent(btnContainer)
+				.setButtonText('Cancel')
+				.onClick(() => {
+					modal.close();
+					resolve(null);
+				});
+			
+			new ButtonComponent(btnContainer)
+				.setButtonText('Save')
+				.setCta()
+				.onClick(() => {
+					const result = input.value.trim();
+					modal.close();
+					resolve(result);
+				});
+			
+			input.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') {
+					const result = input.value.trim();
+					modal.close();
+					resolve(result);
+				} else if (e.key === 'Escape') {
+					modal.close();
+					resolve(null);
+				}
+			});
+			
+			modal.open();
+		});
+	}
+
+	/** Open session list modal */
+	private openSessionList(): void {
+		const modal = new Modal(this.app);
+		modal.titleEl.setText('Chat History');
+		modal.contentEl.addClass('agentlink-session-list-modal');
+		
+		const sessions = this.sessionManager.getAllSessions();
+		
+		if (sessions.length === 0) {
+			modal.contentEl.createEl('p', { 
+				text: 'No chat history yet.',
+				cls: 'agentlink-empty-state'
+			});
+		} else {
+			const listContainer = modal.contentEl.createDiv({ cls: 'agentlink-session-list' });
+			
+			for (const session of sessions) {
+				this.renderSessionListItem(listContainer, session, modal);
+			}
+		}
+		
+		// Add "New Chat" button at bottom
+		const footer = modal.contentEl.createDiv({ cls: 'agentlink-modal-footer' });
+		footer.style.marginTop = '1em';
+		footer.style.paddingTop = '1em';
+		footer.style.borderTop = '1px solid var(--background-modifier-border)';
+		
+		new ButtonComponent(footer)
+			.setButtonText('+ New Chat')
+			.setCta()
+			.onClick(() => {
+				modal.close();
+				this.createNewSession();
+			});
+		
+		modal.open();
+	}
+
+	/** Render inline history dropdown */
+	private renderHistoryDropdown(container: HTMLElement): void {
+		const sessions = this.sessionManager.getAllSessions();
+
+		container.empty();
+		container.style.display = 'block';
+		container.style.position = 'absolute';
+		container.style.top = '100%';
+		container.style.right = '0';
+		container.style.zIndex = '1000';
+		container.style.minWidth = '280px';
+		container.style.maxWidth = '360px';
+		container.style.maxHeight = '320px';
+		container.style.overflowY = 'auto';
+		container.style.padding = '0.5rem';
+		container.style.background = 'var(--background-primary)';
+		container.style.border = '1px solid var(--background-modifier-border)';
+		container.style.borderRadius = '8px';
+		container.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
+
+		// New Chat button
+		const newChatBtn = container.createEl('button', { text: '+ New Chat' });
+		newChatBtn.style.width = '100%';
+		newChatBtn.style.display = 'block';
+		newChatBtn.style.padding = '0.6rem 0.75rem';
+		newChatBtn.style.marginBottom = '0.5rem';
+		newChatBtn.style.border = 'none';
+		newChatBtn.style.borderRadius = '6px';
+		newChatBtn.style.background = 'var(--interactive-accent)';
+		newChatBtn.style.color = 'var(--text-on-accent)';
+		newChatBtn.style.textAlign = 'left';
+		newChatBtn.style.cursor = 'pointer';
+		newChatBtn.style.fontWeight = '600';
+		newChatBtn.addEventListener('click', () => {
+			container.style.display = 'none';
+			this.createNewSession();
+		});
+
+		if (sessions.length === 0) {
+			const empty = container.createEl('div', { text: 'No history' });
+			empty.style.padding = '0.75rem';
+			empty.style.color = 'var(--text-muted)';
+			empty.style.fontSize = '0.9rem';
+			return;
+		}
+
+		// Session list
+		for (const session of sessions) {
+			const item = container.createEl('button');
+			item.type = 'button';
+			item.style.width = '100%';
+			item.style.display = 'block';
+			item.style.padding = '0.65rem 0.75rem';
+			item.style.marginBottom = '0.35rem';
+			item.style.border = '1px solid var(--background-modifier-border)';
+			item.style.borderRadius = '6px';
+			item.style.background = session.id === this.currentSessionId
+				? 'var(--background-modifier-hover)'
+				: 'transparent';
+			item.style.color = 'var(--text-normal)';
+			item.style.textAlign = 'left';
+			item.style.cursor = 'pointer';
+
+			const title = item.createEl('div', { text: session.title });
+			title.style.fontWeight = '600';
+			title.style.marginBottom = '0.15rem';
+
+			const date = new Date(session.updatedAt).toLocaleString();
+			const meta = item.createEl('div', {
+				text: `${date} • ${session.messageCount} messages`,
+			});
+			meta.style.fontSize = '0.85rem';
+			meta.style.color = 'var(--text-muted)';
+
+			item.addEventListener('click', () => {
+				this.loadSession(session.id);
+				container.style.display = 'none';
+			});
+		}
+	}
+
+	/** Render a session list item */
+	private renderSessionListItem(
+		container: HTMLElement, 
+		session: SessionMetadata, 
+		modal: Modal
+	): void {
+		const item = container.createDiv({ 
+			cls: `agentlink-session-item ${session.id === this.currentSessionId ? 'is-active' : ''}`
+		});
+		
+		// Title and meta
+		const info = item.createDiv({ cls: 'agentlink-session-item-info' });
+		info.createEl('div', { 
+			text: session.title,
+			cls: 'agentlink-session-item-title'
+		});
+		
+		const date = new Date(session.updatedAt).toLocaleString();
+		info.createEl('div', { 
+			text: `${date} • ${session.messageCount} messages`,
+			cls: 'agentlink-session-item-meta'
+		});
+		
+		// Actions
+		const actions = item.createDiv({ cls: 'agentlink-session-item-actions' });
+		
+		// Load button
+		new ButtonComponent(actions)
+			.setButtonText(session.id === this.currentSessionId ? 'Current' : 'Load')
+			.setDisabled(session.id === this.currentSessionId)
+			.onClick(() => {
+				modal.close();
+				this.loadSession(session.id);
+				new Notice('Session loaded');
+			});
+		
+		// Delete button
+		new ButtonComponent(actions)
+			.setButtonText('Delete')
+			.setWarning()
+			.onClick(async () => {
+				const confirmed = await this.confirmDelete(session.title);
+				if (confirmed) {
+					await this.sessionManager.deleteSession(session.id);
+					if (session.id === this.currentSessionId) {
+						this.createNewSession();
+					}
+					modal.close();
+					new Notice('Session deleted');
+					// Reopen modal to refresh list
+					this.openSessionList();
+				}
+			});
+	}
+
+	/** Confirm deletion */
+	private confirmDelete(title: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const modal = new Modal(this.app);
+			modal.titleEl.setText('Delete Session');
+			
+			modal.contentEl.createEl('p', {
+				text: `Are you sure you want to delete "${title}"? This cannot be undone.`
+			});
+			
+			const btnContainer = modal.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
+			btnContainer.style.display = 'flex';
+			btnContainer.style.gap = '0.5em';
+			btnContainer.style.marginTop = '1em';
+			btnContainer.style.justifyContent = 'flex-end';
+			
+			new ButtonComponent(btnContainer)
+				.setButtonText('Cancel')
+				.onClick(() => {
+					modal.close();
+					resolve(false);
+				});
+			
+			new ButtonComponent(btnContainer)
+				.setButtonText('Delete')
+				.setWarning()
+				.onClick(() => {
+					modal.close();
+					resolve(true);
+				});
+			
+			modal.open();
+		});
+	}
+
+	/** Save current session */
+	private async saveCurrentSession(): Promise<void> {
+		if (this.currentSessionId) {
+			const backend = getActiveBackendConfig(this.settings);
+			await this.sessionManager.updateSession(
+				this.currentSessionId,
+				this.session.getMessages(),
+				backend?.id
+			);
 		}
 	}
 }

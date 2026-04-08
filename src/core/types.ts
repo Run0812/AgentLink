@@ -118,6 +118,8 @@ export interface StreamHandlers {
 	onComplete(fullText: string): void;
 	/** Called when an error occurs during streaming. */
 	onError(error: Error): void;
+	/** Called when a tool call update is received (for UI card display). */
+	onToolCall?(tool: string, params: Record<string, unknown>, status: 'pending' | 'executing' | 'completed' | 'error', result?: string): void;
 }
 
 // ── Agent Capability Types ─────────────────────────────────────────────
