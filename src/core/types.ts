@@ -56,7 +56,7 @@ export interface BackendSummary {
 
 // ── Message types ──────────────────────────────────────────────────────
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'error' | 'status' | 'tool_call' | 'file_edit';
+export type MessageRole = 'user' | 'assistant' | 'system' | 'error' | 'status' | 'tool_call' | 'file_edit' | 'thinking';
 
 export interface ChatMessage {
 	id: string;
@@ -95,11 +95,20 @@ export interface AgentStatus {
 
 export interface AgentInput {
 	prompt: string;
+	attachments?: Attachment[];
 	context?: {
 		fileContent?: string;
 		selectedText?: string;
 	};
 	history?: ChatMessage[];
+}
+
+export interface Attachment {
+	id: string;
+	type: 'file' | 'selection' | 'note';
+	name: string;
+	content: string;
+	size: number;
 }
 
 export interface StreamHandlers {
@@ -327,7 +336,7 @@ export interface AgentAdapter {
 	/** Tear down the connection / kill any running process. */
 	disconnect(): Promise<void>;
 	/** Send a message and receive a streaming response. */
-	sendMessage(input: AgentInput, handlers: StreamHandlers): Promise<void>;
+	sendMessage(input: AgentInput, handlers: StreamHandlers, options?: { onThinkingChunk?: (text: string) => void }): Promise<void>;
 	/** Cancel an in-flight request. */
 	cancel(): Promise<void>;
 	/** Return the current adapter status. */

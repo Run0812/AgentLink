@@ -319,6 +319,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// Streaming handlers
 	private currentHandlers: StreamHandlers | null = null;
 	private responseBuffer: string[] = [];
+	private thinkingBuffer: string[] = [];
+	private onThinkingChunk?: (text: string) => void;
 
 	constructor(config: AcpBridgeAdapterConfig) {
 		this.config = config;
@@ -383,7 +385,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	// ── Message Sending ──────────────────────────────────────────────────────
 
-	async sendMessage(input: AgentInput, handlers: StreamHandlers): Promise<void> {
+	async sendMessage(input: AgentInput, handlers: StreamHandlers, options?: { onThinkingChunk?: (text: string) => void }): Promise<void> {
 		console.log('[ACP Adapter] ========================================');
 		console.log('[ACP Adapter] sendMessage called');
 		
@@ -399,6 +401,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.state = 'busy';
 		this.currentHandlers = handlers;
 		this.responseBuffer = [];
+		this.thinkingBuffer = [];
+		this.onThinkingChunk = options?.onThinkingChunk;
 
 		console.log('[ACP Adapter] Sending prompt:', input.prompt);
 		console.log('[ACP Adapter] Session ID:', this.sessionId);
@@ -525,28 +529,47 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	handleAgentThinking(text: string): void {
 		console.log('[ACP Adapter] handleAgentThinking:', text.substring(0, 50));
-		const formatted = `<thinking>\n${text}\n</thinking>\n\n`;
-		this.responseBuffer.push(formatted);
-		if (this.currentHandlers) {
-			this.currentHandlers.onChunk(formatted);
+		this.thinkingBuffer.push(text);
+		// 调用 UI 回调来显示 thinking 内容
+		if (this.onThinkingChunk) {
+			this.onThinkingChunk(text);
 		}
 	}
 
 	handleToolCall(update: acp.ToolCallUpdate): void {
-		console.log('[ACP Adapter] handleToolCall:', update.toolCallId, update.title);
-		const toolCallInfo = `\`\`\`json\n{"type":"tool_call","id":"${update.toolCallId}","title":"${update.title}","status":"${update.status}"}\n\`\`\`\n\n`;
-		this.responseBuffer.push(toolCallInfo);
-		if (this.currentHandlers) {
-			this.currentHandlers.onChunk(toolCallInfo);
+		console.log('[ACP Adapter] handleToolCall:', update.toolCallId, update.title, update.status);
+		// Don't output raw JSON to the response - tool calls are handled separately via UI
+		// If needed, we can format a simplified message here
+		if (update.status === 'in_progress') {
+			const toolMsg = `🔍 **${update.title}**...\n\n`;
+			this.responseBuffer.push(toolMsg);
+			if (this.currentHandlers) {
+				this.currentHandlers.onChunk(toolMsg);
+			}
 		}
 	}
 
 	handleToolResult(toolCallId: string, text: string): void {
 		console.log('[ACP Adapter] handleToolResult:', toolCallId);
-		const resultInfo = `\n**Tool Result:**\n${text}\n\n`;
-		this.responseBuffer.push(resultInfo);
-		if (this.currentHandlers) {
-			this.currentHandlers.onChunk(resultInfo);
+		// Don't output raw tool results - they should be handled by the agent and included in its response
+		// If the agent doesn't include the result in its response, we can optionally show a summary
+		try {
+			// Try to parse as JSON to see if we can extract meaningful info
+			const result = JSON.parse(text);
+			if (result.query || result.title) {
+				// It's a search result - don't show raw JSON, agent will summarize
+				return;
+			}
+		} catch {
+			// Not JSON, show as plain text if it looks useful
+		}
+		// Only show non-JSON results or very short results
+		if (!text.startsWith('{') && text.length < 200) {
+			const resultMsg = `✅ **Result:** ${text}\n\n`;
+			this.responseBuffer.push(resultMsg);
+			if (this.currentHandlers) {
+				this.currentHandlers.onChunk(resultMsg);
+			}
 		}
 	}
 
@@ -755,6 +778,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.serverCapabilities = [];
 		this.currentHandlers = null;
 		this.responseBuffer = [];
+		this.thinkingBuffer = [];
+		this.onThinkingChunk = undefined;
 
 		console.log('[ACP Adapter] Cleanup complete');
 	}

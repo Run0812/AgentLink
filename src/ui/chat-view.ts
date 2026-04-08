@@ -239,6 +239,10 @@ export class ChatView extends ItemView {
 		};
 
 		let accumulated = '';
+		let accumulatedThinking = '';
+		let thinkingMsgId: string | null = null;
+		let thinkingEl: HTMLElement | null = null;
+		let isThinkingVisible = false;
 
 		const handlers: StreamHandlers = {
 			onChunk: (chunk: string) => {
@@ -274,8 +278,46 @@ export class ChatView extends ItemView {
 			},
 		};
 
+		// Options with onThinkingChunk callback
+		const options = {
+			onThinkingChunk: (text: string) => {
+				accumulatedThinking += text;
+				
+				// Create thinking message on first chunk
+				if (!thinkingMsgId) {
+					const thinkingMsg = this.session.addMessage('thinking', '');
+					thinkingMsgId = thinkingMsg.id;
+					// Insert thinking message BEFORE assistant message
+					const assistantEl = this.messagesEl.querySelector(`[data-msg-id="${assistantMsg.id}"]`);
+					if (assistantEl) {
+						const thinkingEl = this.renderMessage(thinkingMsg);
+						this.messagesEl.insertBefore(thinkingEl, assistantEl);
+					}
+					isThinkingVisible = true;
+				}
+				
+				// Update thinking message content with Markdown rendering
+				if (thinkingMsgId) {
+					this.session.updateMessage(thinkingMsgId, accumulatedThinking);
+					const thinkingMsgEl = this.messagesEl.querySelector(`[data-msg-id="${thinkingMsgId}"]`);
+					if (thinkingMsgEl) {
+						const contentEl = thinkingMsgEl.querySelector('.agentlink-message-content') as HTMLElement;
+						if (contentEl) {
+							const bodyEl = contentEl.querySelector('.agentlink-thinking-body') as HTMLElement;
+							if (bodyEl) {
+								bodyEl.empty();
+								// Use MarkdownRenderer for thinking content
+								MarkdownRenderer.render(this.app, accumulatedThinking, bodyEl, '', this);
+							}
+						}
+					}
+				}
+				this.scrollToBottom();
+			},
+		};
+
 		try {
-			await this.adapter.sendMessage(input, handlers);
+			await this.adapter.sendMessage(input, handlers, options);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			this.session.addMessage('error', msg);
@@ -347,6 +389,38 @@ export class ChatView extends ItemView {
 			if (msg.content) {
 				this.renderAssistantContent(contentEl, msg.content);
 			}
+		} else if (msg.role === 'thinking') {
+			// Render thinking content with collapsible styling
+			contentEl.addClass('agentlink-thinking-content');
+			
+			// Create header with toggle
+			const header = contentEl.createDiv({ cls: 'agentlink-thinking-header' });
+			const title = header.createDiv({ cls: 'agentlink-thinking-title' });
+			title.createSpan({ cls: 'agentlink-thinking-icon', text: '💭' });
+			title.createSpan({ text: 'Thinking' });
+			
+			// Show time if available (stored in metadata or calculate from timestamp)
+			header.createSpan({ cls: 'agentlink-thinking-time', text: 'Thought process' });
+			
+			const toggle = header.createSpan({ cls: 'agentlink-thinking-toggle', text: '▼' });
+			
+			// Create body with content - use MarkdownRenderer
+			const body = contentEl.createDiv({ cls: 'agentlink-thinking-body' });
+			// Use MarkdownRenderer for thinking content
+			MarkdownRenderer.render(this.app, msg.content, body, '', this);
+			
+			// Collapse/expand functionality
+			header.addEventListener('click', () => {
+				const isCollapsed = contentEl.hasClass('agentlink-thinking-collapsed');
+				contentEl.toggleClass('agentlink-thinking-collapsed', !isCollapsed);
+				toggle.setText(isCollapsed ? '▼' : '▶');
+			});
+			
+			// Start collapsed if content is long
+			if (msg.content.length > 300) {
+				contentEl.addClass('agentlink-thinking-collapsed');
+				toggle.setText('▶');
+			}
 		} else if (msg.role === 'error') {
 			contentEl.addClass('agentlink-error-content');
 			contentEl.setText(msg.content);
@@ -413,6 +487,10 @@ export class ChatView extends ItemView {
 				return '🛠️ Tool Call';
 			case 'file_edit':
 				return '📝 File Edit';
+			case 'thinking':
+				return '💭 Thinking';
+			default:
+				return 'Unknown';
 		}
 	}
 
