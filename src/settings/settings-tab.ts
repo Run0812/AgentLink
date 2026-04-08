@@ -1,7 +1,8 @@
 import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
-import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createMockBackendConfig } from './settings';
+import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createMockBackendConfig, mergeAcpRegistryIntoSettings } from './settings';
+import { fetchAcpRegistry } from './registry-utils';
 
 export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
@@ -19,6 +20,10 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 		// Backend Management Section
 		this.renderBackendManagement(containerEl);
+
+		// ACP Registry Settings Section
+		containerEl.createEl('h3', { text: 'ACP Registry' });
+		this.renderRegistrySettings(containerEl);
 
 		// Global Settings Section
 		containerEl.createEl('h3', { text: 'Global Settings' });
@@ -327,6 +332,90 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						config.autoConfirmTools = value;
 						await this.plugin.saveSettings();
+					});
+			});
+	}
+
+	// ── ACP Registry Settings ────────────────────────────────────────────
+
+	private renderRegistrySettings(containerEl: HTMLElement): void {
+		// Enable ACP Registry Sync toggle
+		new Setting(containerEl)
+			.setName('Enable ACP Registry Sync')
+			.setDesc('Automatically sync ACP agents from CDN')
+			.addToggle(toggle => {
+				toggle.setValue(this.plugin.settings.enableAcpRegistrySync)
+					.onChange(async (value) => {
+						this.plugin.settings.enableAcpRegistrySync = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		// Sync Interval number input
+		new Setting(containerEl)
+			.setName('Sync Interval (hours)')
+			.setDesc('How often to sync from ACP CDN (1-168 hours)')
+			.addText(text => {
+				text.setPlaceholder('12')
+					.setValue(String(this.plugin.settings.acpRegistrySyncIntervalHours))
+					.onChange(async (value) => {
+						const n = parseInt(value, 10);
+						if (!isNaN(n) && n >= 1 && n <= 168) {
+							this.plugin.settings.acpRegistrySyncIntervalHours = n;
+							await this.plugin.saveSettings();
+						}
+					});
+				text.inputEl.type = 'number';
+				text.inputEl.min = '1';
+				text.inputEl.max = '168';
+			});
+
+		// Show last sync time if available
+		if (this.plugin.settings.lastAcpRegistrySync) {
+			const lastSync = new Date(this.plugin.settings.lastAcpRegistrySync);
+			new Setting(containerEl)
+				.setName('Last Sync')
+				.setDesc(`Last successful sync: ${lastSync.toLocaleString()}`)
+				.setDisabled(true);
+		}
+
+		// Sync Now button
+		new Setting(containerEl)
+			.setName('Manual Sync')
+			.setDesc('Force sync ACP registry from CDN now')
+			.addButton(button => {
+				button.setButtonText('Sync Now')
+					.onClick(async () => {
+						button.setDisabled(true);
+						button.setButtonText('Syncing...');
+						try {
+							const result = await fetchAcpRegistry();
+							if (result) {
+								const { backends, lastSync } = await mergeAcpRegistryIntoSettings(this.app, this.plugin.settings);
+								this.plugin.settings.backends = backends;
+								this.plugin.settings.lastAcpRegistrySync = lastSync;
+								await this.plugin.saveSettings();
+								new Notice(`Synced ${result.agents?.length || 0} ACP agents from registry`);
+								this.display();
+							}
+						} catch (error) {
+							const message = error instanceof Error ? error.message : String(error);
+							new Notice(`Sync failed: ${message}`);
+						} finally {
+							button.setDisabled(false);
+							button.setButtonText('Sync Now');
+						}
+					});
+			});
+
+		// Add Custom ACP Agent button
+		new Setting(containerEl)
+			.setName('Custom Agent')
+			.setDesc('Add a custom ACP agent configuration')
+			.addButton(button => {
+				button.setButtonText('Add Custom ACP Agent')
+					.onClick(() => {
+						this.openAddBackendModal('acp-bridge');
 					});
 			});
 	}

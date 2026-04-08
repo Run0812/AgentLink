@@ -1,7 +1,86 @@
 # AgentLink 开发进展记录
 
 > 最后更新: 2026-04-08
-> 更新内容: ACP Session Config Options 动态渲染完成
+> 更新内容: UI修复 + ACP Registry功能完成
+
+---
+
+### 2026-04-08 - UI修复与优化 ✅
+
+**修复内容**：
+
+- ✅ **底部配置选项始终显示**
+  - 当 Agent 没有返回 configOptions 时，显示默认值（Mode: Ask/Code/Auto, Model: Default/Fast/Quality）
+  - 确保用户始终可以看到并切换配置
+
+- ✅ **顶部按钮右对齐**
+  - 标题栏按钮（历史、清空、新对话）现在正确右对齐
+  - 状态LED和Backend名称居中显示
+
+- ✅ **统一图标风格**
+  - 历史按钮：🕐（时钟）
+  - 清空按钮：✕（叉号）
+  - 新对话按钮：＋（加号，新增在顶部）
+
+- ✅ **历史下拉菜单优化**
+  - 移除了底部的 "+ New Chat" 按钮（已在顶部添加）
+  - 每个历史对话项右侧添加删除按钮（✕）
+  - 点击对话标题加载，点击删除按钮删除
+
+---
+
+### 2026-04-08 - ACP Registry 功能 ✅
+
+**根据 https://agentclientprotocol.com/get-started/registry 实现**：
+
+- ✅ **Registry 数据获取**
+  - 支持从 CDN (`https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`) 拉取最新 registry
+  - 本地缓存 registry 数据到 `data/acp-registry.json`
+
+- ✅ **自动同步设置**
+  - 新增设置项：启用/禁用 Registry 自动同步
+  - 可配置同步间隔（1-168 小时）
+  - 支持手动 "Sync Now" 立即同步
+
+- ✅ **自定义 ACP 代理**
+  - 支持添加自定义 ACP Agent（不通过 Registry）
+  - 在设置中点击 "Add Custom ACP Agent" 按钮
+
+- ✅ **Registry 集成**
+  - Registry 中的 Agent 自动转换为 backend configs
+  - 与现有 backend 列表合并显示
+  - 支持从 Registry 中选择并配置 Agent
+
+**Registry 中的知名 Agents**（已支持）：
+- Claude Agent, Kimi CLI, OpenCode, Codex CLI
+- Cursor, GitHub Copilot, Gemini CLI
+- Goose, Junie, Cline, Auggie
+- 以及 20+ 其他 ACP 兼容 Agent
+
+---
+
+### 2026-04-08 - Phase 5: 框架迁移（Preact）✅
+
+**目标**：将 `chat-view.ts` 中最复杂且变化频繁的底部配置栏，从原生 DOM 手写渲染迁移到组件化框架渲染。
+
+**本次迁移内容**：
+
+- ✅ 引入 **Preact** 作为轻量 UI 框架（避免引入 React 体积与兼容成本）
+- ✅ 构建配置调整：
+  - `tsconfig.json` 启用 JSX（`jsx: react-jsx`, `jsxImportSource: preact`）
+  - `esbuild.config.mjs` 启用 automatic JSX 并指定 `preact`
+- ✅ 新增组件：`src/ui/components/config-toolbar.tsx`
+  - 将 `mode / model / thought_level` 下拉渲染迁移为组件
+  - 统一选项展示与交互行为
+- ✅ `ChatView` 接入组件渲染：
+  - 使用 `preact.render()` 挂载/卸载配置栏
+  - `setAdapter()` / `refreshSettings()` 自动刷新配置组件
+  - 选项变化统一走 `handleConfigOptionChange()`，回调 `adapter.setConfigOption()`
+
+**迁移结果**：
+
+- UI 逻辑由「手写 DOM 拼装」转为「组件化渲染」，后续迭代（新增选项/布局调整/状态联动）维护成本显著降低。
+- 不影响现有 AgentAdapter 协议层，保持 ACP 兼容。
 
 ---
 

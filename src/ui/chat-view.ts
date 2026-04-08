@@ -11,6 +11,8 @@
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
 import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, ConfigOptionValue } from '../core/types';
+import { h, render } from 'preact';
+import { ConfigToolbar } from './components/config-toolbar';
 import { CancellationError } from '../core/errors';
 import { logger } from '../core/logger';
 import { SessionStore } from '../services/session-store';
@@ -45,7 +47,6 @@ export class ChatView extends ItemView {
 	private stopBtn!: HTMLButtonElement;
 	private clearBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
-	private backendLabel!: HTMLElement;
 	
 	// ── Header DOM references ──────────────────────────────────────────
 	private headerEl!: HTMLElement;
@@ -103,11 +104,13 @@ export class ChatView extends ItemView {
 	setAdapter(adapter: AgentAdapter): void {
 		this.adapter = adapter;
 		this.refreshStatus();
+		void this.loadConfigOptions();
 	}
 
 	refreshSettings(): void {
 		this.settings = this.onSettingsRead();
 		this.refreshStatus();
+		void this.loadConfigOptions();
 		
 		// Update ToolExecutor config
 		this.toolExecutor.updateConfig({
@@ -124,6 +127,10 @@ export class ChatView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		if (this.configButtonsContainer) {
+			render(null, this.configButtonsContainer);
+		}
+
 		if (this.adapter) {
 			try {
 				await this.adapter.disconnect();
@@ -149,10 +156,10 @@ export class ChatView extends ItemView {
 	// ── UI construction ────────────────────────────────────────────────
 
 	private buildUI(container: HTMLElement): void {
-		// Header with Cursor-style layout
+		// Header
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
 		
-		// Row 1: Agent Selector | Status LED | Backend | Actions
+		// Row 1: Session title (left) | Actions (right)
 		const headerRow1 = this.headerEl.createDiv({ cls: 'agentlink-header-row1' });
 		headerRow1.style.display = 'flex';
 		headerRow1.style.alignItems = 'center';
@@ -160,68 +167,14 @@ export class ChatView extends ItemView {
 		headerRow1.style.padding = '0.4rem 0.6rem';
 		headerRow1.style.borderBottom = '1px solid var(--background-modifier-border)';
 		
-		// Left: Agent Selector Dropdown (like Cursor)
-		const leftSection = headerRow1.createDiv();
-		leftSection.style.display = 'flex';
-		leftSection.style.alignItems = 'center';
-		leftSection.style.gap = '0.3rem';
+		// Left: Session title (as subtitle)
+		this.sessionTitleEl = headerRow1.createEl('span', { text: 'New Chat' });
+		this.sessionTitleEl.style.fontSize = '0.85rem';
+		this.sessionTitleEl.style.color = 'var(--text-muted)';
+		this.sessionTitleEl.style.cursor = 'pointer';
+		this.sessionTitleEl.addEventListener('click', () => this.renameCurrentSession());
 		
-		// Agent selector button with dropdown
-		const agentContainer = leftSection.createDiv();
-		agentContainer.style.position = 'relative';
-		this.agentSelectorBtn = agentContainer.createEl('button');
-		this.agentSelectorBtn.style.display = 'flex';
-		this.agentSelectorBtn.style.alignItems = 'center';
-		this.agentSelectorBtn.style.gap = '0.3rem';
-		this.agentSelectorBtn.style.padding = '0.3rem 0.5rem';
-		this.agentSelectorBtn.style.background = 'var(--background-secondary)';
-		this.agentSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
-		this.agentSelectorBtn.style.borderRadius = '4px';
-		this.agentSelectorBtn.style.cursor = 'pointer';
-		this.agentSelectorBtn.style.fontSize = '0.85rem';
-		this.agentSelectorBtn.style.color = 'var(--text-normal)';
-		
-		const agentIcon = this.agentSelectorBtn.createEl('span');
-		agentIcon.innerHTML = '🤖';
-		agentIcon.style.fontSize = '0.9rem';
-		const agentText = this.agentSelectorBtn.createEl('span');
-		agentText.textContent = 'Agent';
-		const agentArrow = this.agentSelectorBtn.createEl('span');
-		agentArrow.innerHTML = '▾';
-		agentArrow.style.fontSize = '0.7rem';
-		agentArrow.style.opacity = '0.6';
-		
-		// Agent dropdown
-		const agentDropdown = agentContainer.createDiv();
-		agentDropdown.style.display = 'none';
-		this.agentSelectorBtn.addEventListener('click', (e) => {
-			e.stopPropagation();
-			const isOpen = agentDropdown.style.display !== 'none';
-			agentDropdown.style.display = isOpen ? 'none' : 'block';
-			if (!isOpen) this.renderAgentDropdown(agentDropdown);
-		});
-		document.addEventListener('click', () => agentDropdown.style.display = 'none');
-		
-		// Center: Status LED + Backend name
-		const centerSection = headerRow1.createDiv();
-		centerSection.style.display = 'flex';
-		centerSection.style.alignItems = 'center';
-		centerSection.style.gap = '0.4rem';
-		
-		// Status LED (HDD indicator style)
-		this.statusLed = centerSection.createEl('span');
-		this.statusLed.style.width = '7px';
-		this.statusLed.style.height = '7px';
-		this.statusLed.style.borderRadius = '50%';
-		this.statusLed.style.background = '#6b7280';
-		this.statusLed.style.transition = 'all 0.15s ease';
-		
-		// Backend name
-		this.backendLabel = centerSection.createEl('span');
-		this.backendLabel.style.fontSize = '0.85rem';
-		this.backendLabel.style.color = 'var(--text-muted)';
-		
-		// Right: Action buttons (minimal)
+		// Right: Action buttons
 		const rightSection = headerRow1.createDiv();
 		rightSection.style.display = 'flex';
 		rightSection.style.alignItems = 'center';
@@ -231,7 +184,7 @@ export class ChatView extends ItemView {
 		const historyContainer = rightSection.createDiv();
 		historyContainer.style.position = 'relative';
 		this.historyBtn = historyContainer.createEl('button');
-		this.historyBtn.innerHTML = '📜';
+		this.historyBtn.innerHTML = '🕐';
 		this.historyBtn.style.padding = '0.3rem 0.4rem';
 		this.historyBtn.style.background = 'transparent';
 		this.historyBtn.style.border = 'none';
@@ -253,7 +206,7 @@ export class ChatView extends ItemView {
 		
 		// Clear button
 		this.clearBtn = rightSection.createEl('button');
-		this.clearBtn.innerHTML = '🗑️';
+		this.clearBtn.innerHTML = '✕';
 		this.clearBtn.style.padding = '0.3rem 0.4rem';
 		this.clearBtn.style.background = 'transparent';
 		this.clearBtn.style.border = 'none';
@@ -264,17 +217,18 @@ export class ChatView extends ItemView {
 		this.clearBtn.addEventListener('mouseleave', () => this.clearBtn.style.opacity = '0.7');
 		this.clearBtn.addEventListener('click', () => this.clearConversation());
 		
-		// Row 2: Session title (editable, secondary)
-		const headerRow2 = this.headerEl.createDiv();
-		headerRow2.style.padding = '0.25rem 0.6rem';
-		headerRow2.style.background = 'var(--background-secondary)';
-		headerRow2.style.borderBottom = '1px solid var(--background-modifier-border)';
-		
-		this.sessionTitleEl = headerRow2.createEl('span', { text: 'New Chat' });
-		this.sessionTitleEl.style.fontSize = '0.8rem';
-		this.sessionTitleEl.style.color = 'var(--text-muted)';
-		this.sessionTitleEl.style.cursor = 'pointer';
-		this.sessionTitleEl.addEventListener('click', () => this.renameCurrentSession());
+		// New Chat button
+		const newChatBtn = rightSection.createEl('button');
+		newChatBtn.innerHTML = '＋';
+		newChatBtn.style.padding = '0.3rem 0.4rem';
+		newChatBtn.style.background = 'transparent';
+		newChatBtn.style.border = 'none';
+		newChatBtn.style.cursor = 'pointer';
+		newChatBtn.style.fontSize = '0.95rem';
+		newChatBtn.style.opacity = '0.7';
+		newChatBtn.addEventListener('mouseenter', () => newChatBtn.style.opacity = '1');
+		newChatBtn.addEventListener('mouseleave', () => newChatBtn.style.opacity = '0.7');
+		newChatBtn.addEventListener('click', () => this.createNewSession());
 		
 		// Messages area
 		this.messagesEl = container.createDiv({ cls: 'agentlink-messages' });
@@ -288,17 +242,84 @@ export class ChatView extends ItemView {
 		inputContainer.style.borderTop = '1px solid var(--background-modifier-border)';
 		inputContainer.style.background = 'var(--background-secondary)';
 		
-		// Input row with buttons on right
+		// Agent selector row (above input box)
+		const agentSelectorRow = inputContainer.createDiv();
+		agentSelectorRow.style.display = 'flex';
+		agentSelectorRow.style.alignItems = 'center';
+		agentSelectorRow.style.gap = '0.4rem';
+		agentSelectorRow.style.padding = '0.4rem 0.6rem 0.2rem';
+		
+		// Agent selector button with dropdown (shows actual agent name)
+		const agentContainer = agentSelectorRow.createDiv();
+		agentContainer.style.position = 'relative';
+		this.agentSelectorBtn = agentContainer.createEl('button');
+		this.agentSelectorBtn.style.display = 'flex';
+		this.agentSelectorBtn.style.alignItems = 'center';
+		this.agentSelectorBtn.style.gap = '0.3rem';
+		this.agentSelectorBtn.style.padding = '0.3rem 0.5rem';
+		this.agentSelectorBtn.style.background = 'var(--background-secondary)';
+		this.agentSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
+		this.agentSelectorBtn.style.borderRadius = '4px';
+		this.agentSelectorBtn.style.cursor = 'pointer';
+		this.agentSelectorBtn.style.fontSize = '0.85rem';
+		this.agentSelectorBtn.style.color = 'var(--text-normal)';
+		this.agentSelectorBtn.style.whiteSpace = 'nowrap';
+		
+		const agentIcon = this.agentSelectorBtn.createEl('span');
+		agentIcon.innerHTML = '🤖';
+		agentIcon.style.fontSize = '0.9rem';
+		const agentText = this.agentSelectorBtn.createEl('span');
+		agentText.textContent = 'Agent'; // Will be updated by refreshStatus
+		agentText.style.maxWidth = '150px';
+		agentText.style.overflow = 'hidden';
+		agentText.style.textOverflow = 'ellipsis';
+		agentText.style.whiteSpace = 'nowrap';
+		const agentArrow = this.agentSelectorBtn.createEl('span');
+		agentArrow.innerHTML = '▾';
+		agentArrow.style.fontSize = '0.7rem';
+		agentArrow.style.opacity = '0.6';
+		
+		// Agent dropdown
+		const agentDropdown = agentContainer.createDiv();
+		agentDropdown.style.display = 'none';
+		this.agentSelectorBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isOpen = agentDropdown.style.display !== 'none';
+			agentDropdown.style.display = isOpen ? 'none' : 'block';
+			if (!isOpen) this.renderAgentDropdown(agentDropdown);
+		});
+		document.addEventListener('click', () => agentDropdown.style.display = 'none');
+		
+		// Status LED (next to agent selector, NOT in header)
+		this.statusLed = agentSelectorRow.createEl('span');
+		this.statusLed.style.width = '8px';
+		this.statusLed.style.height = '8px';
+		this.statusLed.style.borderRadius = '50%';
+		this.statusLed.style.background = '#6b7280';
+		this.statusLed.style.transition = 'all 0.15s ease';
+		this.statusLed.style.flexShrink = '0';
+		
+		// Input row with resizable textarea
 		const inputRow = inputContainer.createDiv();
 		inputRow.style.display = 'flex';
 		inputRow.style.gap = '0.5rem';
 		inputRow.style.padding = '0.6rem';
+		inputRow.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		this.inputEl = inputRow.createEl('textarea', { placeholder: 'Ask your AI agent…' });
-		this.inputEl.style.flex = '1';
+		// Create a wrapper for the textarea to handle resizing
+		const textareaWrapper = inputRow.createDiv();
+		textareaWrapper.style.flex = '1';
+		textareaWrapper.style.display = 'flex';
+		textareaWrapper.style.flexDirection = 'column';
+		textareaWrapper.style.minHeight = '2.8rem';
+		textareaWrapper.style.position = 'relative';
+
+		this.inputEl = textareaWrapper.createEl('textarea', { placeholder: 'Ask your AI agent…' });
+		this.inputEl.style.width = '100%';
 		this.inputEl.style.height = '2.8rem';
 		this.inputEl.style.minHeight = '2.8rem';
-		this.inputEl.style.resize = 'none';
+		this.inputEl.style.maxHeight = '300px';
+		this.inputEl.style.resize = 'vertical';
 		this.inputEl.style.padding = '0.5rem 0.6rem';
 		this.inputEl.style.border = '1px solid var(--background-modifier-border)';
 		this.inputEl.style.borderRadius = '6px';
@@ -311,40 +332,12 @@ export class ChatView extends ItemView {
 			}
 		});
 
-		const btnCol = inputRow.createDiv();
-		btnCol.style.display = 'flex';
-		btnCol.style.flexDirection = 'column';
-		btnCol.style.gap = '0.25rem';
-
-		this.sendBtn = btnCol.createEl('button', { text: 'Send' });
-		this.sendBtn.style.padding = '0 0.9rem';
-		this.sendBtn.style.height = '1.4rem';
-		this.sendBtn.style.background = 'var(--interactive-accent)';
-		this.sendBtn.style.color = 'var(--text-on-accent)';
-		this.sendBtn.style.border = 'none';
-		this.sendBtn.style.borderRadius = '4px';
-		this.sendBtn.style.cursor = 'pointer';
-		this.sendBtn.style.fontSize = '0.75rem';
-		this.sendBtn.addEventListener('click', () => this.handleSend());
-
-		this.stopBtn = btnCol.createEl('button', { text: 'Stop' });
-		this.stopBtn.style.padding = '0 0.9rem';
-		this.stopBtn.style.height = '1.4rem';
-		this.stopBtn.style.background = 'var(--background-modifier-error)';
-		this.stopBtn.style.color = 'var(--text-on-accent)';
-		this.stopBtn.style.border = 'none';
-		this.stopBtn.style.borderRadius = '4px';
-		this.stopBtn.style.cursor = 'pointer';
-		this.stopBtn.style.fontSize = '0.75rem';
-		this.stopBtn.style.display = 'none';
-		this.stopBtn.addEventListener('click', () => this.handleStop());
-
-		// Bottom toolbar: Dynamic configOptions + Quick Config (like Cursor)
+		// Bottom toolbar: Dynamic configOptions + Send/Stop button
 		const bottomToolbar = inputContainer.createDiv();
 		bottomToolbar.style.display = 'flex';
 		bottomToolbar.style.alignItems = 'center';
 		bottomToolbar.style.justifyContent = 'space-between';
-		bottomToolbar.style.padding = '0 0.6rem 0.4rem';
+		bottomToolbar.style.padding = '0.4rem 0.6rem';
 		bottomToolbar.style.gap = '0.5rem';
 		
 		// Container for dynamic configOptions
@@ -353,29 +346,32 @@ export class ChatView extends ItemView {
 		this.configButtonsContainer.style.alignItems = 'center';
 		this.configButtonsContainer.style.gap = '0.3rem';
 		
-		// Right: Quick config buttons (Auto-confirm toggle)
-		const quickConfigContainer = bottomToolbar.createDiv();
-		quickConfigContainer.style.display = 'flex';
-		quickConfigContainer.style.alignItems = 'center';
-		quickConfigContainer.style.gap = '0.3rem';
-		quickConfigContainer.style.marginLeft = 'auto'; // Push to right
+		// Right: Send/Stop button
+		const sendBtnContainer = bottomToolbar.createDiv();
+		sendBtnContainer.style.marginLeft = 'auto';
 		
-		// Auto-confirm toggle
-		const autoConfirmBtn = quickConfigContainer.createEl('button');
-		autoConfirmBtn.innerHTML = '✓ Auto';
-		autoConfirmBtn.style.padding = '0.2rem 0.4rem';
-		autoConfirmBtn.style.background = this.settings.autoConfirmRead ? 'var(--interactive-accent)' : 'transparent';
-		autoConfirmBtn.style.color = this.settings.autoConfirmRead ? 'var(--text-on-accent)' : 'var(--text-muted)';
-		autoConfirmBtn.style.border = '1px solid var(--background-modifier-border)';
-		autoConfirmBtn.style.borderRadius = '4px';
-		autoConfirmBtn.style.cursor = 'pointer';
-		autoConfirmBtn.style.fontSize = '0.7rem';
-		autoConfirmBtn.addEventListener('click', () => {
-			this.settings.autoConfirmRead = !this.settings.autoConfirmRead;
-			autoConfirmBtn.style.background = this.settings.autoConfirmRead ? 'var(--interactive-accent)' : 'transparent';
-			autoConfirmBtn.style.color = this.settings.autoConfirmRead ? 'var(--text-on-accent)' : 'var(--text-muted)';
-			this.onSettingsSave();
-		});
+		this.sendBtn = sendBtnContainer.createEl('button', { text: 'Send' });
+		this.sendBtn.style.padding = '0.3rem 1.2rem';
+		this.sendBtn.style.height = '1.8rem';
+		this.sendBtn.style.background = 'var(--interactive-accent)';
+		this.sendBtn.style.color = 'var(--text-on-accent)';
+		this.sendBtn.style.border = 'none';
+		this.sendBtn.style.borderRadius = '4px';
+		this.sendBtn.style.cursor = 'pointer';
+		this.sendBtn.style.fontSize = '0.8rem';
+		this.sendBtn.addEventListener('click', () => this.handleSend());
+
+		this.stopBtn = sendBtnContainer.createEl('button', { text: 'Stop' });
+		this.stopBtn.style.padding = '0.3rem 1.2rem';
+		this.stopBtn.style.height = '1.8rem';
+		this.stopBtn.style.background = 'var(--background-modifier-error)';
+		this.stopBtn.style.color = 'var(--text-on-accent)';
+		this.stopBtn.style.border = 'none';
+		this.stopBtn.style.borderRadius = '4px';
+		this.stopBtn.style.cursor = 'pointer';
+		this.stopBtn.style.fontSize = '0.8rem';
+		this.stopBtn.style.display = 'none';
+		this.stopBtn.addEventListener('click', () => this.handleStop());
 
 		// Load and render configOptions from adapter
 		this.loadConfigOptions();
@@ -400,164 +396,44 @@ export class ChatView extends ItemView {
 
 	/** Load configOptions from adapter and render buttons */
 	private async loadConfigOptions(): Promise<void> {
-		if (!this.adapter) return;
+		if (!this.configButtonsContainer) return;
 
-		// Clear existing buttons
-		this.configButtonsContainer.empty();
-
-		// Get configOptions from adapter
-		let configOptions: ConfigOption[] = [];
-		if (this.adapter.getConfigOptions) {
-			configOptions = this.adapter.getConfigOptions();
-		}
-
-		// If no configOptions from adapter, add defaults for display
-		if (configOptions.length === 0) {
-			// Add default mock configOptions for UI demonstration
-			configOptions = [
-				{
-					id: 'model',
-					name: 'Model',
-					category: 'model',
-					type: 'select',
-					currentValue: 'default',
-					options: [
-						{ value: 'default', name: 'Default' },
-						{ value: 'fast', name: 'Fast' },
-						{ value: 'quality', name: 'Quality' },
-					],
-				},
-				{
-					id: 'mode',
-					name: 'Mode',
-					category: 'mode',
-					type: 'select',
-					currentValue: 'ask',
-					options: [
-						{ value: 'ask', name: 'Ask' },
-						{ value: 'code', name: 'Code' },
-						{ value: 'auto', name: 'Auto' },
-					],
-				},
-			];
-		}
-
+		// Get configOptions from adapter (may be empty if not supported)
+		const configOptions = this.adapter?.getConfigOptions?.() ?? [];
 		this.sessionConfig = { configOptions };
 
-		// Render a button for each configOption
-		for (const option of configOptions) {
-			this.renderConfigOptionButton(option);
-		}
+		render(
+			h(ConfigToolbar, {
+				options: configOptions,
+				onSelect: async (configId: string, value: string) => {
+					await this.handleConfigOptionChange(configId, value);
+				},
+			}),
+			this.configButtonsContainer,
+		);
 	}
 
-	/** Render a single configOption as a dropdown button */
-	private renderConfigOptionButton(option: ConfigOption): void {
-		const container = this.configButtonsContainer.createDiv();
-		container.style.position = 'relative';
+	private async handleConfigOptionChange(configId: string, value: string): Promise<void> {
+		const target = this.sessionConfig.configOptions.find((o) => o.id === configId);
+		if (!target) return;
 
-		const btn = container.createEl('button');
-		btn.style.display = 'flex';
-		btn.style.alignItems = 'center';
-		btn.style.gap = '0.2rem';
-		btn.style.padding = '0.2rem 0.4rem';
-		btn.style.background = 'transparent';
-		btn.style.border = '1px solid var(--background-modifier-border)';
-		btn.style.borderRadius = '4px';
-		btn.style.cursor = 'pointer';
-		btn.style.fontSize = '0.7rem';
-		btn.style.color = 'var(--text-muted)';
+		const selected = target.options.find((v) => v.value === value);
+		if (!selected) return;
 
-		// Icon based on category
-		let icon = '⚙️';
-		if (option.category === 'mode') icon = '🛡️';
-		else if (option.category === 'model') icon = '⚡';
-		else if (option.category === 'thought_level') icon = '💭';
+		try {
+			const updated = this.adapter?.setConfigOption
+				? await this.adapter.setConfigOption(configId, value)
+				: this.sessionConfig.configOptions.map((o) =>
+						o.id === configId ? { ...o, currentValue: value } : o,
+				  );
 
-		const iconSpan = btn.createEl('span');
-		iconSpan.innerHTML = icon;
-
-		// Current value display
-		const currentOpt = option.options.find((o: ConfigOptionValue) => o.value === option.currentValue);
-		const valueSpan = btn.createEl('span');
-		valueSpan.textContent = currentOpt?.name || option.currentValue;
-
-		const arrowSpan = btn.createEl('span');
-		arrowSpan.innerHTML = '▾';
-		arrowSpan.style.fontSize = '0.6rem';
-
-		// Dropdown container
-		const dropdown = container.createDiv();
-		dropdown.style.display = 'none';
-		dropdown.style.position = 'absolute';
-		dropdown.style.bottom = '100%';
-		dropdown.style.left = '0';
-		dropdown.style.zIndex = '1000';
-		dropdown.style.minWidth = '140px';
-		dropdown.style.padding = '0.3rem';
-		dropdown.style.background = 'var(--background-primary)';
-		dropdown.style.border = '1px solid var(--background-modifier-border)';
-		dropdown.style.borderRadius = '4px';
-		dropdown.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-		dropdown.style.marginBottom = '0.3rem';
-
-		// Render options
-		for (const opt of option.options) {
-			const item = dropdown.createEl('button');
-			item.type = 'button';
-			item.style.display = 'block';
-			item.style.width = '100%';
-			item.style.padding = '0.3rem 0.5rem';
-			item.style.marginBottom = '0.15rem';
-			item.style.border = 'none';
-			item.style.borderRadius = '3px';
-			item.style.background = opt.value === option.currentValue ? 'var(--background-modifier-hover)' : 'transparent';
-			item.style.color = 'var(--text-normal)';
-			item.style.textAlign = 'left';
-			item.style.cursor = 'pointer';
-			item.style.fontSize = '0.75rem';
-
-			item.createEl('span', { text: opt.name });
-			if (opt.description) {
-				item.createEl('span', { 
-					text: opt.description,
-					cls: 'agentlink-dropdown-desc',
-				}).style.display = 'block';
-				item.style.fontSize = '0.7rem';
-			}
-
-			item.addEventListener('click', async () => {
-				dropdown.style.display = 'none';
-				
-				// Update button display
-				valueSpan.textContent = opt.name;
-
-				// Update config option via adapter
-				if (this.adapter?.setConfigOption) {
-					try {
-						await this.adapter.setConfigOption(option.id, opt.value);
-						new Notice(`${option.name}: ${opt.name}`);
-					} catch (error) {
-						logger.error('Failed to set config option:', error);
-					}
-				}
-
-				// Update local state
-				option.currentValue = opt.value;
-				this.sessionConfig = { 
-					configOptions: this.sessionConfig.configOptions.map(o => 
-						o.id === option.id ? { ...o, currentValue: opt.value } : o
-					)
-				};
-			});
+			this.sessionConfig = { configOptions: updated };
+			new Notice(`${target.name}: ${selected.name}`);
+			await this.loadConfigOptions();
+		} catch (error) {
+			logger.error('Failed to set config option:', error);
+			new Notice(`Failed to set ${target.name}`);
 		}
-
-		// Toggle dropdown
-		btn.addEventListener('click', (e) => {
-			e.stopPropagation();
-			const isOpen = dropdown.style.display !== 'none';
-			dropdown.style.display = isOpen ? 'none' : 'block';
-		});
-		document.addEventListener('click', () => dropdown.style.display = 'none');
 	}
 
 	// ── Message sending ────────────────────────────────────────────────
@@ -849,7 +725,9 @@ export class ChatView extends ItemView {
 			case 'user':
 				return 'You';
 			case 'assistant':
-				return this.adapter?.label ?? 'Agent';
+				// Show backend name (e.g., "Kimi Code") instead of adapter label ("ACP Bridge")
+				const backend = getActiveBackendConfig(this.settings);
+				return backend?.name ?? this.adapter?.label ?? 'Agent';
 			case 'system':
 				return 'System';
 			case 'error':
@@ -894,27 +772,32 @@ export class ChatView extends ItemView {
 	}
 
 	private refreshStatus(): void {
-		if (!this.backendLabel || !this.statusLed) return;
+		// Update agent selector text to show actual agent name
+		if (this.agentSelectorBtn) {
+			const activeBackend = getActiveBackendConfig(this.settings);
+			const agentText = this.agentSelectorBtn.querySelector('span:nth-child(2)') as HTMLElement;
+			if (agentText && activeBackend) {
+				agentText.textContent = activeBackend.name;
+			}
+		}
 
-		const activeBackend = getActiveBackendConfig(this.settings);
-		const statusState = this.adapter?.getStatus().state ?? 'disconnected';
-		const backendName = activeBackend?.name ?? 'None';
-
-		this.backendLabel.setText(backendName);
-		
-		// Update LED color based on connection state
-		if (statusState === 'connected') {
-			this.statusLed.style.background = '#4ade80';
-			this.statusLed.style.animation = 'none';
-			this.statusLed.style.boxShadow = '0 0 3px #4ade80';
-		} else if (statusState === 'disconnected') {
-			this.statusLed.style.background = '#f87171';
-			this.statusLed.style.animation = 'none';
-			this.statusLed.style.boxShadow = '0 0 3px #f87171';
-		} else {
-			this.statusLed.style.background = '#6b7280';
-			this.statusLed.style.animation = 'none';
-			this.statusLed.style.boxShadow = 'none';
+		// Update status LED
+		if (this.statusLed) {
+			const statusState = this.adapter?.getStatus().state ?? 'disconnected';
+			
+			if (statusState === 'connected') {
+				this.statusLed.style.background = '#4ade80';
+				this.statusLed.style.animation = 'none';
+				this.statusLed.style.boxShadow = '0 0 3px #4ade80';
+			} else if (statusState === 'disconnected') {
+				this.statusLed.style.background = '#f87171';
+				this.statusLed.style.animation = 'none';
+				this.statusLed.style.boxShadow = '0 0 3px #f87171';
+			} else {
+				this.statusLed.style.background = '#6b7280';
+				this.statusLed.style.animation = 'none';
+				this.statusLed.style.boxShadow = 'none';
+			}
 		}
 	}
 
@@ -1633,23 +1516,13 @@ export class ChatView extends ItemView {
 		container.style.borderRadius = '8px';
 		container.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
 
-		// New Chat button
-		const newChatBtn = container.createEl('button', { text: '+ New Chat' });
-		newChatBtn.style.width = '100%';
-		newChatBtn.style.display = 'block';
-		newChatBtn.style.padding = '0.6rem 0.75rem';
-		newChatBtn.style.marginBottom = '0.5rem';
-		newChatBtn.style.border = 'none';
-		newChatBtn.style.borderRadius = '6px';
-		newChatBtn.style.background = 'var(--interactive-accent)';
-		newChatBtn.style.color = 'var(--text-on-accent)';
-		newChatBtn.style.textAlign = 'left';
-		newChatBtn.style.cursor = 'pointer';
-		newChatBtn.style.fontWeight = '600';
-		newChatBtn.addEventListener('click', () => {
-			container.style.display = 'none';
-			this.createNewSession();
-		});
+		// Header
+		const header = container.createEl('div', { text: 'Chat History' });
+		header.style.fontSize = '0.75rem';
+		header.style.color = 'var(--text-muted)';
+		header.style.padding = '0.3rem 0.5rem';
+		header.style.marginBottom = '0.3rem';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
 
 		if (sessions.length === 0) {
 			const empty = container.createEl('div', { text: 'No history' });
@@ -1659,37 +1532,79 @@ export class ChatView extends ItemView {
 			return;
 		}
 
-		// Session list
+		// Session list with delete buttons
 		for (const session of sessions) {
-			const item = container.createEl('button');
-			item.type = 'button';
-			item.style.width = '100%';
-			item.style.display = 'block';
-			item.style.padding = '0.65rem 0.75rem';
+			const item = container.createDiv();
+			item.style.display = 'flex';
+			item.style.alignItems = 'center';
+			item.style.gap = '0.4rem';
+			item.style.padding = '0.5rem';
 			item.style.marginBottom = '0.35rem';
-			item.style.border = '1px solid var(--background-modifier-border)';
+			item.style.border = `1px solid ${session.id === this.currentSessionId ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}`;
 			item.style.borderRadius = '6px';
 			item.style.background = session.id === this.currentSessionId
 				? 'var(--background-modifier-hover)'
 				: 'transparent';
-			item.style.color = 'var(--text-normal)';
-			item.style.textAlign = 'left';
 			item.style.cursor = 'pointer';
 
-			const title = item.createEl('div', { text: session.title });
+			// Click to load (on the info part)
+			const info = item.createDiv();
+			info.style.flex = '1';
+			info.style.minWidth = '0'; // Allow truncation
+			
+			const title = info.createEl('div', { text: session.title });
 			title.style.fontWeight = '600';
+			title.style.fontSize = '0.9rem';
 			title.style.marginBottom = '0.15rem';
+			title.style.whiteSpace = 'nowrap';
+			title.style.overflow = 'hidden';
+			title.style.textOverflow = 'ellipsis';
 
 			const date = new Date(session.updatedAt).toLocaleString();
-			const meta = item.createEl('div', {
+			const meta = info.createEl('div', {
 				text: `${date} • ${session.messageCount} messages`,
 			});
-			meta.style.fontSize = '0.85rem';
+			meta.style.fontSize = '0.8rem';
 			meta.style.color = 'var(--text-muted)';
 
-			item.addEventListener('click', () => {
+			info.addEventListener('click', () => {
 				this.loadSession(session.id);
 				container.style.display = 'none';
+			});
+
+			// Delete button
+			const deleteBtn = item.createEl('button');
+			deleteBtn.innerHTML = '✕';
+			deleteBtn.style.padding = '0.2rem 0.4rem';
+			deleteBtn.style.background = 'transparent';
+			deleteBtn.style.border = 'none';
+			deleteBtn.style.borderRadius = '4px';
+			deleteBtn.style.cursor = 'pointer';
+			deleteBtn.style.fontSize = '0.85rem';
+			deleteBtn.style.color = 'var(--text-muted)';
+			deleteBtn.style.opacity = '0.6';
+			deleteBtn.addEventListener('mouseenter', () => {
+				deleteBtn.style.opacity = '1';
+				deleteBtn.style.background = 'var(--background-modifier-error)';
+				deleteBtn.style.color = 'var(--text-on-accent)';
+			});
+			deleteBtn.addEventListener('mouseleave', () => {
+				deleteBtn.style.opacity = '0.6';
+				deleteBtn.style.background = 'transparent';
+				deleteBtn.style.color = 'var(--text-muted)';
+			});
+			deleteBtn.addEventListener('click', async (e) => {
+				e.stopPropagation();
+				const confirmed = await this.confirmDelete(session.title);
+				if (confirmed) {
+					await this.sessionManager.deleteSession(session.id);
+					if (session.id === this.currentSessionId) {
+						this.createNewSession();
+					}
+					// Refresh dropdown
+					this.renderHistoryDropdown(container);
+					new Notice('Session deleted');
+				}
 			});
 		}
 	}

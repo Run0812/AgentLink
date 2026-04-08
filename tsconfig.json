@@ -25,7 +25,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "downlevelIteration": true,
-    "types": ["node"]
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

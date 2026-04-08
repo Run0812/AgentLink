@@ -14,6 +14,7 @@ import {
 	findBackendConfig,
 	createMockBackendConfig,
 	createKimiBackendConfig,
+	mergeAcpRegistryIntoSettings,
 } from './settings/settings';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
@@ -29,7 +30,7 @@ export default class AgentLinkPlugin extends Plugin {
 
 	// ── Lifecycle ──────────────────────────────────────────────────────
 
-	async onload(): Promise<void> {
+async onload(): Promise<void> {
 		await this.loadSettings();
 		
 		// Initialize SessionManager
@@ -38,7 +39,15 @@ export default class AgentLinkPlugin extends Plugin {
 		
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
-
+		
+		// Merge ACP registry into settings (if sync enabled)
+		if (this.settings.enableAcpRegistrySync) {
+			const { backends, lastSync } = await mergeAcpRegistryIntoSettings(this.app, this.settings);
+			this.settings.backends = backends;
+			this.settings.lastAcpRegistrySync = lastSync;
+			await this.saveSettings(); // persist registry update
+		}
+		
 		this.buildAdapter();
 
 		// Register the custom sidebar view
