@@ -158,17 +158,21 @@ export class ChatView extends ItemView {
 	private buildUI(container: HTMLElement): void {
 		// Header
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
+		this.headerEl.style.width = '100%';
 		
 		// Row 1: Session title (left) | Actions (right)
 		const headerRow1 = this.headerEl.createDiv({ cls: 'agentlink-header-row1' });
 		headerRow1.style.display = 'flex';
 		headerRow1.style.alignItems = 'center';
 		headerRow1.style.justifyContent = 'space-between';
+		headerRow1.style.width = '100%';
 		headerRow1.style.padding = '0.4rem 0.6rem';
 		headerRow1.style.borderBottom = '1px solid var(--background-modifier-border)';
 		
 		// Left: Session title (as subtitle)
-		this.sessionTitleEl = headerRow1.createEl('span', { text: 'New Chat' });
+		const leftSection = headerRow1.createDiv();
+		leftSection.style.flex = '1';
+		this.sessionTitleEl = leftSection.createEl('span', { text: 'New Chat' });
 		this.sessionTitleEl.style.fontSize = '0.85rem';
 		this.sessionTitleEl.style.color = 'var(--text-muted)';
 		this.sessionTitleEl.style.cursor = 'pointer';
@@ -179,6 +183,7 @@ export class ChatView extends ItemView {
 		rightSection.style.display = 'flex';
 		rightSection.style.alignItems = 'center';
 		rightSection.style.gap = '0.1rem';
+		rightSection.style.flexShrink = '0'; // Prevent shrinking
 		
 		// History dropdown button
 		const historyContainer = rightSection.createDiv();
