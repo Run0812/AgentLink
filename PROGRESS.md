@@ -1,7 +1,7 @@
 # AgentLink 开发进展记录
 
 > 最后更新: 2026-04-07
-> 更新内容: 添加 OpenCode Web 作为 Embedded Web 测试方案
+> 更新内容: Phase 3 ACP Bridge Mode 完整实现
 
 ---
 
@@ -12,7 +12,7 @@
 | Phase 0 - 项目基础 | ✅ 已完成 | 100% |
 | Phase 1 - 核心类型与接口定义 | ✅ 已完成 | 100% |
 | Phase 2 - 工具调用机制 | ✅ 已完成 | 100% |
-| Phase 3 - ACP Bridge Mode | 🟡 骨架完成 | 15% |
+| **Phase 3 - ACP Bridge Mode** | ✅ **已完成** | **100%** |
 | Phase 4 - Embedded Web Mode | 🟡 骨架完成 | 15% |
 | Phase 5 - 工程加固与发布 | ❌ 未开始 | 0% |
 
@@ -155,25 +155,53 @@ interface AgentAdapter {
 
 ---
 
-### Phase 3 - ACP Bridge Mode 🟡
+### Phase 3 - ACP Bridge Mode ✅ **NEW - 今日完成**
 
-**状态**: 骨架代码完成，协议实现待开发
+**状态**: 已完成
 
-**已完成**:
-- `AcpBridgeAdapter` 类结构
-- 配置类型定义
-- `getCapabilities()` 占位
+**文件**: `src/adapters/acp-bridge-adapter.ts` (重构，791行)
 
-**待实现**:
-- [ ] ACP 协议 WebSocket/HTTP 通信
-- [ ] ACP 消息格式解析
-- [ ] 工具调用暂停机制
-- [ ] 工具结果回传
-- [ ] 会话管理（sessionId）
-- [ ] 流式响应处理
-- [ ] 错误处理与重连
+**已完成功能**:
 
-**测试工具**: Kimi Code CLI（已配置在 RPD.md）
+#### 1. ACP 协议实现
+- ✅ JSON-RPC 2.0 消息格式
+- ✅ stdio 通信层（stdin/stdout）
+- ✅ 换行分隔的 JSON 消息处理
+- ✅ Request/Response/Notification 消息类型
+
+#### 2. 连接管理
+- ✅ Bridge 进程启动和管理
+- ✅ ACP 协议初始化 (`initialize`)
+- ✅ 会话创建 (`session/new`)
+- ✅ 连接状态管理 (disconnected/connecting/connected/busy/error)
+
+#### 3. 消息处理
+- ✅ 流式响应处理 (`session/update` notifications)
+- ✅ 文本内容流式接收
+- ✅ Thinking/Reasoning 过程显示
+- ✅ 工具调用请求处理
+- ✅ 文件读写请求处理
+- ✅ 权限请求处理
+
+#### 4. 工具调用机制
+- ✅ 工具调用暂停机制
+- ✅ `resumeAfterTool()`: 工具执行后恢复对话
+- ✅ `rejectTool()`: 拒绝工具调用
+- ✅ `hasPendingToolCalls()`: 检查待处理工具
+- ✅ `getPendingToolCalls()`: 获取待处理工具列表
+
+#### 5. 错误处理
+- ✅ 请求超时处理
+- ✅ 连接错误处理
+- ✅ 取消操作支持
+- ✅ 进程错误处理
+
+**协议规范参考**:
+- 创建了 `ACP_PROTOCOL_SPEC.md` - 完整 ACP 协议规范文档
+- 创建了 `ACP_RESEARCH_SUMMARY.md` - 快速参考指南
+- 参考: https://agentclientprotocol.com
+
+**测试工具**: Kimi Code CLI
 
 **配置示例**:
 ```typescript
@@ -182,12 +210,18 @@ interface AgentAdapter {
   id: 'kimi-local',
   name: 'Kimi Code',
   bridgeCommand: 'kimi',
-  bridgeArgs: 'acp',
-  acpServerURL: 'http://localhost:8080'
+  bridgeArgs: ['acp'],
+  acpServerURL: 'http://localhost:8080', // 兼容性保留
+  workspaceRoot: '/path/to/vault',
+  env: {},
+  timeoutMs: 120000,
+  autoConfirmTools: false
 }
 ```
 
-**预估工作量**: 3-5 天
+**测试状态**: 78/78 单元测试通过 ✅
+
+**完成日期**: 2026-04-07
 
 ---
 
@@ -252,25 +286,189 @@ interface AgentAdapter {
 
 ### 近期（1-2 周）
 
-1. **Phase 3 - ACP Bridge Mode** 🔴 当前重点
-   - 研究 ACP 协议细节 (https://agentclientprotocol.com)
-   - 实现 WebSocket/HTTP 通信
-   - ACP 消息格式解析（text/thinking/tool_call/file_edit）
-   - 工具调用暂停机制
-   - 工具结果回传
-   - 使用 Kimi CLI 进行测试
+1. **Phase 4 - Embedded Web Mode** 🔴 当前重点
+   - 实现 iframe 嵌入 Web UI
+   - 实现 postMessage 双向通信
+   - OpenCode Web 适配测试
+   - 工具调用代理机制
 
 ### 中期（3-4 周）
 
-2. **Phase 4 - Embedded Web Mode**
-   - 完成 iframe 集成
-   - 实现 postMessage 通信
-   - OpenCode Web 适配
-
-3. **Phase 5 - 工程加固与发布**
+2. **Phase 5 - 工程加固与发布**
    - 编写 README 和配置指南
    - 错误处理完善
    - 提交到 Obsidian 社区插件市场
+
+---
+
+## 🔧 近期改进
+
+### 2026-04-08 - ACP session/update 消息格式修复 ✅
+
+**问题**: 消息发送成功，模型被调用，但没有回显
+
+**原因**: `session/update` 通知的消息格式解析错误
+
+我之前的实现（错误）：
+```typescript
+interface SessionUpdate {
+  status: 'thinking' | 'generating' | 'tool_calling';
+  content?: string;
+  // ...
+}
+```
+
+官方 ACP 格式（正确）：
+```typescript
+interface SessionUpdate {
+  sessionUpdate: 'agent_message_chunk' | 'thought' | 'tool_call' | 'tool_call_update' | 'plan';
+  content?: { type: 'text' | 'thinking'; text?: string };
+  toolCallId?: string;
+  title?: string;
+  status?: 'pending' | 'in_progress' | 'completed';
+  // ...
+}
+```
+
+**修复内容**:
+1. 根据官方 ACP 文档重新定义 `SessionUpdate` 类型
+2. 重写 `handleSessionUpdate()` 方法处理正确的消息格式
+3. 支持所有消息类型：
+   - `agent_message_chunk` - 代理文本响应
+   - `thought` - 思考过程
+   - `tool_call` - 工具调用开始
+   - `tool_call_update` - 工具调用状态更新
+   - `plan` - 执行计划
+
+**参考**: [ACP Prompt Turn 文档](https://agentclientprotocol.com/protocol/prompt-turn)
+
+### 2026-04-08 - ACP Bridge 协议修复 ✅
+
+**问题**: 使用 Kimi CLI 测试时出现 "Invalid params" 错误
+
+**原因**:
+- `session/new` 请求缺少必需的 `mcpServers` 参数
+- 使用了错误的参数名 `workspaceRoot` 而不是 `cwd`
+
+**修复内容**:
+
+1. **修复 `createSession()` 方法** (`src/adapters/acp-bridge-adapter.ts`)
+   ```typescript
+   // 修复前
+   await this.sendRequest('session/new', {
+     workspaceRoot: this.config.workspaceRoot,
+   });
+   
+   // 修复后
+   await this.sendRequest('session/new', {
+     cwd: this.config.workspaceRoot || process.cwd(),
+     mcpServers: [], // 必需参数
+   });
+   ```
+
+2. **增强错误处理** (`src/adapters/acp-bridge-adapter.ts`)
+   - 添加对 `AUTH_REQUIRED` 错误的特殊处理
+   - 提示用户运行 `kimi login` 进行认证
+   - 为 "Invalid params" 错误提供更详细的上下文
+
+3. **创建测试脚本**
+   - `test-kimi-acp.js` - 完整的 ACP 协议测试脚本
+   - 测试 initialize → session/new → session/prompt 完整流程
+   - 显示详细的请求/响应日志
+
+**验证结果**:
+```
+✅ Initialize successful
+   Agent: Kimi Code CLI x.x.x
+   Protocol version: 1
+
+✅ Session created: sess_xxx
+   Current mode: default
+   Current model: kimi-k2-...
+
+✅ Prompt completed
+   Stop reason: end_turn
+```
+
+**使用说明**:
+```bash
+# 先登录 Kimi
+kimi login
+
+# 测试 ACP 连接
+node test-kimi-acp.js
+```
+
+### 2026-04-07 - 构建系统优化 ✅
+
+**新增功能**:
+- ✅ **构建产物输出到 build/ 目录**
+  - 修改 `esbuild.config.mjs`，生产构建时输出到 `build/` 文件夹
+  - 自动复制 `manifest.json` 和 `styles.css` 到 build 目录
+  - 构建完成显示产物大小统计
+
+- ✅ **增强 package.json 脚本**
+  ```json
+  {
+    "build": "npm run lint && npm run test && node esbuild.config.mjs production",
+    "build:quick": "node esbuild.config.mjs production",
+    "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\""
+  }
+  ```
+
+**构建产物**:
+```
+build/
+├── main.js       (98.1 KB) - 主程序
+├── manifest.json (0.3 KB)  - 插件清单
+└── styles.css    (7.4 KB)  - 样式文件
+```
+
+**使用方法**:
+```bash
+# 完整构建（包含检查、测试、构建）
+npm run build
+
+# 快速构建（仅构建）
+npm run build:quick
+
+# 清理构建目录
+npm run clean
+```
+
+### 2026-04-07 - 配置系统优化 ✅
+
+**问题修复**:
+- ✅ **自动添加缺失的预设配置**
+  - 修复了 `Object.assign` 导致已保存配置覆盖默认预设的问题
+  - 新增 `ensurePresetBackends()` 方法，自动检测并添加缺失的 Kimi/OpenCode 预设
+  - 已安装用户重新启用插件后会自动获得新预设
+
+- ✅ **简化 ACP 配置**
+  - `acpServerURL` 现在为可选字段（`acpServerURL?: string`）
+  - Kimi Code 预设移除了不必要的 URL 配置
+  - 更新设置面板说明，明确说明 URL 只在 HTTP/WebSocket bridge 时需要
+
+**新增功能**:
+- ✅ **配置导入/导出（JSON格式）**
+  - 设置面板新增 "📥 Import Config" 和 "📤 Export Config" 按钮
+  - 导出：将所有后端配置保存为 JSON 文件（`agentlink-config-YYYY-MM-DD.json`）
+  - 导入：从 JSON 文件导入后端配置，自动跳过重复的 ID
+  - 方便用户备份、分享和批量修改配置
+
+**文件变更**:
+- `src/main.ts`: 添加 `ensurePresetBackends()` 和导入
+- `src/core/types.ts`: `acpServerURL` 改为可选
+- `src/settings/settings.ts`: Kimi 预设移除 URL，添加导出函数
+- `src/settings/settings-tab.ts`: 添加导入/导出 UI 和逻辑
+- `src/adapters/acp-bridge-adapter.ts`: `acpServerURL` 改为可选
+
+### 2026-04-07 - 内置预设配置 ✅
+
+**新增功能**:
+- ✅ 内置 Kimi Code 预设配置 (`kimi-code`)
+- ✅ 内置 OpenCode Web 预设配置 (`opencode-web`)
+- ✅ 设置面板添加预设配置说明
 
 ---
 
@@ -281,13 +479,15 @@ interface AgentAdapter {
 | 源文件数 | 22 |
 | 测试文件数 | 10 |
 | 单元测试数 | 78 |
-| 代码行数（估计） | ~4000 |
+| 代码行数（估计） | ~5000 |
 
 ---
 
 ## 🔗 参考文档
 
 - [RPD.md](./RPD.md) - 开发需求文档
+- [ACP_PROTOCOL_SPEC.md](./ACP_PROTOCOL_SPEC.md) - ACP 协议规范文档
+- [ACP_RESEARCH_SUMMARY.md](./ACP_RESEARCH_SUMMARY.md) - ACP 快速参考
 - [Kimi CLI ACP 文档](https://www.kimi.com/code/docs/kimi-cli/guides/ides.html)
 - [Agent Client Protocol](https://agentclientprotocol.com)
 - [OpenCode Web 文档](https://opencode.ai/docs/zh-cn/web/)

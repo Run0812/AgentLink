@@ -325,8 +325,21 @@ export class ChatView extends ItemView {
 		});
 		el.dataset.msgId = msg.id;
 
-		const roleEl = el.createDiv({ cls: 'agentlink-message-role' });
+		// Header row with role and copy button
+		const headerEl = el.createDiv({ cls: 'agentlink-message-header' });
+		
+		const roleEl = headerEl.createDiv({ cls: 'agentlink-message-role' });
 		roleEl.setText(this.roleLabel(msg.role));
+
+		// Add copy button for user and assistant messages
+		if (msg.role === 'user' || msg.role === 'assistant') {
+			const copyBtn = headerEl.createEl('button', {
+				cls: 'agentlink-copy-btn',
+				attr: { 'aria-label': 'Copy message', title: 'Copy message' },
+			});
+			copyBtn.innerHTML = '📋';
+			copyBtn.addEventListener('click', () => this.copyMessageContent(msg));
+		}
 
 		const contentEl = el.createDiv({ cls: 'agentlink-message-content' });
 
@@ -354,6 +367,16 @@ export class ChatView extends ItemView {
 
 		this.scrollToBottom();
 		return el;
+	}
+
+	private async copyMessageContent(msg: ChatMessage): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(msg.content);
+			new Notice('Message copied to clipboard');
+		} catch (err) {
+			logger.error('Failed to copy message:', err);
+			new Notice('Failed to copy message');
+		}
 	}
 
 	private renderAssistantContent(el: HTMLElement, content: string): void {

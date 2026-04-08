@@ -45,6 +45,33 @@ export function createMockBackendConfig(): AgentBackendConfig {
 	};
 }
 
+/** Create preset Kimi Code backend config */
+export function createKimiBackendConfig(): AgentBackendConfig {
+	return {
+		type: 'acp-bridge',
+		id: 'kimi-code',
+		name: '🌙 Kimi Code (ACP)',
+		bridgeCommand: 'kimi',
+		bridgeArgs: 'acp',
+		// Note: Kimi CLI uses stdio for ACP, no URL needed
+		workspaceRoot: '',
+		env: '',
+		timeoutMs: 120000,
+		autoConfirmTools: false,
+	};
+}
+
+/** Create preset OpenCode Web backend config */
+export function createOpenCodeBackendConfig(): AgentBackendConfig {
+	return {
+		type: 'embedded-web',
+		id: 'opencode-web',
+		name: '🔷 OpenCode Web',
+		webURL: 'http://127.0.0.1:3000',
+		timeoutMs: 120000,
+	};
+}
+
 /** Create a default ACP Bridge backend config */
 export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentBackendConfig {
 	return {
@@ -53,7 +80,7 @@ export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentB
 		name: name || 'ACP Bridge',
 		bridgeCommand: '',
 		bridgeArgs: '',
-		acpServerURL: 'http://localhost:8080',
+		// acpServerURL is optional - only needed for HTTP/WebSocket bridges
 		workspaceRoot: '',
 		env: '',
 		timeoutMs: 120000,
@@ -74,7 +101,11 @@ export function createEmbeddedWebBackendConfig(id?: string, name?: string): Agen
 
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
 	activeBackendId: 'mock-default',
-	backends: [createMockBackendConfig()],
+	backends: [
+		createMockBackendConfig(),
+		createKimiBackendConfig(),
+		createOpenCodeBackendConfig(),
+	],
 	requestTimeoutMs: 120000,
 	autoReconnect: false,
 	enableDebugLog: false,

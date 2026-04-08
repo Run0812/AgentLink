@@ -13,6 +13,8 @@ import {
 	getActiveBackendConfig,
 	findBackendConfig,
 	createMockBackendConfig,
+	createKimiBackendConfig,
+	createOpenCodeBackendConfig,
 } from './settings/settings';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
@@ -106,12 +108,34 @@ export default class AgentLinkPlugin extends Plugin {
 			this.settings.activeBackendId = 'mock-default';
 		}
 
+		// Migration: add preset backends if missing
+		this.ensurePresetBackends();
+
 		// Ensure active backend exists
 		const activeExists = this.settings.backends.some(
 			b => b.id === this.settings.activeBackendId
 		);
 		if (!activeExists && this.settings.backends.length > 0) {
 			this.settings.activeBackendId = this.settings.backends[0].id;
+		}
+	}
+
+	/**
+	 * Ensure preset backends (Kimi, OpenCode) exist in the configuration.
+	 * Adds them if missing, without overwriting existing user configs.
+	 */
+	private ensurePresetBackends(): void {
+		const presetFactories = [
+			{ id: 'kimi-code', factory: createKimiBackendConfig },
+			{ id: 'opencode-web', factory: createOpenCodeBackendConfig },
+		];
+
+		for (const preset of presetFactories) {
+			const exists = this.settings.backends.some(b => b.id === preset.id);
+			if (!exists) {
+				logger.info(`Adding preset backend: ${preset.id}`);
+				this.settings.backends.push(preset.factory());
+			}
 		}
 	}
 
@@ -186,19 +210,20 @@ export default class AgentLinkPlugin extends Plugin {
 				this.adapter = new MockAdapter();
 				break;
 
-			case 'acp-bridge': {
-				const cfg: AcpBridgeAdapterConfig = {
-					bridgeCommand: backendConfig.bridgeCommand,
-					bridgeArgs: parseBridgeArgs(backendConfig.bridgeArgs),
-					acpServerURL: backendConfig.acpServerURL,
-					workspaceRoot: backendConfig.workspaceRoot,
-					env: parseEnvString(backendConfig.env),
-					timeoutMs: backendConfig.timeoutMs,
-					autoConfirmTools: backendConfig.autoConfirmTools,
-				};
-				this.adapter = new AcpBridgeAdapter(cfg);
-				break;
-			}
+		case 'acp-bridge': {
+			const cfg: AcpBridgeAdapterConfig = {
+				bridgeCommand: backendConfig.bridgeCommand,
+				bridgeArgs: parseBridgeArgs(backendConfig.bridgeArgs),
+				acpServerURL: backendConfig.acpServerURL,
+				workspaceRoot: backendConfig.workspaceRoot,
+				env: parseEnvString(backendConfig.env),
+				timeoutMs: backendConfig.timeoutMs,
+				autoConfirmTools: backendConfig.autoConfirmTools,
+				app: this.app,
+			};
+			this.adapter = new AcpBridgeAdapter(cfg);
+			break;
+		}
 
 			case 'embedded-web': {
 				const cfg: EmbeddedWebAdapterConfig = {

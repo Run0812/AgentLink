@@ -5,10 +5,12 @@
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "build": "npm run lint && npm run test && node esbuild.config.mjs production",
+    "build:quick": "node esbuild.config.mjs production",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc -noEmit -skipLibCheck",
+    "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [
@@ -28,7 +30,11 @@
     "esbuild": "0.17.3",
     "obsidian": "latest",
     "tslib": "2.4.0",
-    "typescript": "4.7.4",
+    "typescript": "^6.0.2",
     "vitest": "^4.1.2"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.18.1",
+    "zod": "^4.3.6"
   }
 }

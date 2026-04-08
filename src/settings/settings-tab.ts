@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Modal, ButtonComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig, EmbeddedWebBackendConfig } from '../core/types';
 import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createEmbeddedWebBackendConfig, createMockBackendConfig } from './settings';
@@ -33,6 +33,39 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 	private renderBackendManagement(containerEl: HTMLElement): void {
 		containerEl.createEl('h3', { text: 'Agent Backends' });
+
+		// Preset info box
+		const hasPresets = this.plugin.settings.backends.some(b => 
+			b.id === 'kimi-code' || b.id === 'opencode-web'
+		);
+		
+		if (hasPresets) {
+			const presetInfo = containerEl.createDiv({ cls: 'agentlink-preset-info' });
+			presetInfo.style.backgroundColor = 'var(--background-secondary)';
+			presetInfo.style.padding = '1em';
+			presetInfo.style.borderRadius = '6px';
+			presetInfo.style.marginBottom = '1em';
+			presetInfo.style.fontSize = '0.9em';
+			
+			presetInfo.createEl('div', { 
+				text: '🔧 内置预设配置',
+				cls: 'setting-item-name'
+			}).style.marginBottom = '0.5em';
+			
+			const presetList = presetInfo.createEl('ul');
+			presetList.style.margin = '0';
+			presetList.style.paddingLeft = '1.2em';
+			
+			if (this.plugin.settings.backends.some(b => b.id === 'kimi-code')) {
+				const kimiItem = presetList.createEl('li');
+				kimiItem.innerHTML = '<strong>🌙 Kimi Code (ACP)</strong> - 需要安装 kimi-cli: <code>pip install kimi-cli</code>，然后运行 <code>kimi login</code> 登录';
+			}
+			
+			if (this.plugin.settings.backends.some(b => b.id === 'opencode-web')) {
+				const opencodeItem = presetList.createEl('li');
+				opencodeItem.innerHTML = '<strong>🔷 OpenCode Web</strong> - 需要安装 opencode: 参考 <a href="https://opencode.ai/docs/zh-cn/installation.html">官方文档</a>，然后运行 <code>opencode --web --port 3000</code>';
+			}
+		}
 
 		// Active backend selector
 		new Setting(containerEl)
@@ -92,6 +125,28 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					this.display();
 				});
 		}
+
+		// Import/Export buttons
+		const importExportContainer = containerEl.createDiv();
+		importExportContainer.style.display = 'flex';
+		importExportContainer.style.gap = '0.5em';
+		importExportContainer.style.marginTop = '0.5em';
+		importExportContainer.style.borderTop = '1px solid var(--background-modifier-border)';
+		importExportContainer.style.paddingTop = '1em';
+
+		new ButtonComponent(importExportContainer)
+			.setButtonText('📥 Import Config')
+			.setTooltip('Import backends from JSON file')
+			.onClick(() => {
+				this.importConfig();
+			});
+
+		new ButtonComponent(importExportContainer)
+			.setButtonText('📤 Export Config')
+			.setTooltip('Export all backends to JSON file')
+			.onClick(() => {
+				this.exportConfig();
+			});
 
 		// Edit section (if editing)
 		if (this.editingBackendId) {
@@ -226,13 +281,13 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(container)
-			.setName('ACP Server URL')
-			.setDesc('URL of the ACP Server.')
+			.setName('ACP Server URL (Optional)')
+			.setDesc('Only for HTTP/WebSocket-based ACP bridges. Most implementations (like Kimi CLI) use stdio and don\'t need this.')
 			.addText(text => {
-				text.setPlaceholder('http://localhost:8080')
-					.setValue(config.acpServerURL)
+				text.setPlaceholder('http://localhost:8080 (optional)')
+					.setValue(config.acpServerURL || '')
 					.onChange(async (value) => {
-						config.acpServerURL = value;
+						config.acpServerURL = value || undefined;
 						await this.plugin.saveSettings();
 					});
 			});
@@ -441,6 +496,88 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			await this.plugin.saveSettings();
 			this.display();
 		}).open();
+	}
+
+	// ── Import/Export ──────────────────────────────────────────────────────
+
+	private async importConfig(): Promise<void> {
+		// Create hidden file input
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.json';
+		input.style.display = 'none';
+		document.body.appendChild(input);
+
+		input.onchange = async (e) => {
+			const file = (e.target as HTMLInputElement).files?.[0];
+			if (!file) {
+				document.body.removeChild(input);
+				return;
+			}
+
+			try {
+				const text = await file.text();
+				const imported = JSON.parse(text);
+
+				// Validate imported data
+				if (!Array.isArray(imported)) {
+					new Notice('Invalid config format: expected an array of backends');
+					document.body.removeChild(input);
+					return;
+				}
+
+				// Validate each backend
+				for (const backend of imported) {
+					if (!backend.id || !backend.type || !backend.name) {
+						new Notice(`Invalid backend config: missing required fields`);
+						document.body.removeChild(input);
+						return;
+					}
+				}
+
+				// Merge with existing: skip duplicates by ID
+				let addedCount = 0;
+				let skippedCount = 0;
+				for (const backend of imported) {
+					const exists = this.plugin.settings.backends.some(b => b.id === backend.id);
+					if (exists) {
+						skippedCount++;
+					} else {
+						this.plugin.settings.backends.push(backend);
+						addedCount++;
+					}
+				}
+
+				await this.plugin.saveSettings();
+				this.display();
+				new Notice(`Imported ${addedCount} backends (${skippedCount} skipped as duplicates)`);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				new Notice(`Import failed: ${message}`);
+			} finally {
+				document.body.removeChild(input);
+			}
+		};
+
+		input.click();
+	}
+
+	private exportConfig(): void {
+		const data = this.plugin.settings.backends;
+		const json = JSON.stringify(data, null, 2);
+		const blob = new Blob([json], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+
+		// Create download link
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `agentlink-config-${new Date().toISOString().split('T')[0]}.json`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+
+		new Notice(`Exported ${data.length} backends to JSON`);
 	}
 }
 

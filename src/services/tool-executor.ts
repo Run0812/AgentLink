@@ -127,7 +127,7 @@ export class ToolExecutor {
 			return { success: false, content: `Path is not a file: ${path}` };
 		}
 
-		const content = await this.app.vault.read(file);
+		const content = await this.app.vault.read(file as TFile);
 		return {
 			success: true,
 			content,

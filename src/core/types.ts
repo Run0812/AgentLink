@@ -14,19 +14,23 @@ export interface AcpBridgeBackendConfig {
 	id: string;
 	/** Display name */
 	name: string;
-	/** Bridge command to start (empty if already running) */
+	/** Bridge command to start (e.g., 'kimi', 'claude', 'acp-bridge') */
 	bridgeCommand: string;
-	/** Arguments for bridge command */
+	/** Arguments for bridge command (space-separated string for UI, parsed to array for execution) */
 	bridgeArgs: string;
-	/** ACP Server URL */
-	acpServerURL: string;
-	/** Workspace root directory */
+	/** 
+	 * Optional: ACP Server URL for HTTP/WebSocket-based bridges.
+	 * Most ACP implementations (like Kimi CLI) use stdio and don't need this.
+	 * Only required if your bridge uses HTTP/WebSocket transport.
+	 */
+	acpServerURL?: string;
+	/** Workspace root directory (empty = use vault root) */
 	workspaceRoot: string;
-	/** Environment variables */
+	/** Environment variables (KEY=VALUE format, one per line) */
 	env: string;
 	/** Request timeout in ms */
 	timeoutMs: number;
-	/** Auto-confirm tool calls (DANGEROUS) */
+	/** Auto-confirm tool calls (DANGEROUS - use with caution) */
 	autoConfirmTools: boolean;
 }
 

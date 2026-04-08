@@ -55,7 +55,7 @@ describe('AcpBridgeAdapter', () => {
 			});
 
 			expect(result.success).toBe(false);
-			expect(result.content).toContain('not yet implemented');
+			expect(result.content).toContain('not implemented');
 		});
 	});
 
