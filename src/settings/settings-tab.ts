@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
 import AgentLinkPlugin from '../main';
-import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig, EmbeddedWebBackendConfig } from '../core/types';
-import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createEmbeddedWebBackendConfig, createMockBackendConfig } from './settings';
+import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
+import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createMockBackendConfig } from './settings';
 
 export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
@@ -36,7 +36,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 		// Preset info box
 		const hasPresets = this.plugin.settings.backends.some(b => 
-			b.id === 'kimi-code' || b.id === 'opencode-web'
+			b.id === 'kimi-code'
 		);
 		
 		if (hasPresets) {
@@ -59,11 +59,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			if (this.plugin.settings.backends.some(b => b.id === 'kimi-code')) {
 				const kimiItem = presetList.createEl('li');
 				kimiItem.innerHTML = '<strong>🌙 Kimi Code (ACP)</strong> - 需要安装 kimi-cli: <code>pip install kimi-cli</code>，然后运行 <code>kimi login</code> 登录';
-			}
-			
-			if (this.plugin.settings.backends.some(b => b.id === 'opencode-web')) {
-				const opencodeItem = presetList.createEl('li');
-				opencodeItem.innerHTML = '<strong>🔷 OpenCode Web</strong> - 需要安装 opencode: 参考 <a href="https://opencode.ai/docs/zh-cn/installation.html">官方文档</a>，然后运行 <code>opencode --web --port 3000</code>';
 			}
 		}
 
@@ -104,13 +99,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setCta()
 			.onClick(() => {
 				this.openAddBackendModal('acp-bridge');
-			});
-
-		// Add Embedded Web button
-		new ButtonComponent(addBtnContainer)
-			.setButtonText('+ Embedded Web')
-			.onClick(() => {
-				this.openAddBackendModal('embedded-web');
 			});
 
 		// Add Mock button (if not exists)
@@ -238,8 +226,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		// Type-specific fields
 		if (backend.type === 'acp-bridge') {
 			this.renderAcpBridgeSettings(editorContainer, backend as AcpBridgeBackendConfig);
-		} else if (backend.type === 'embedded-web') {
-			this.renderEmbeddedWebSettings(editorContainer, backend as EmbeddedWebBackendConfig);
 		}
 
 		// Close button
@@ -341,36 +327,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						config.autoConfirmTools = value;
 						await this.plugin.saveSettings();
-					});
-			});
-	}
-
-	private renderEmbeddedWebSettings(container: HTMLElement, config: EmbeddedWebBackendConfig): void {
-		container.createEl('h4', { text: 'Embedded Web Configuration' });
-
-		new Setting(container)
-			.setName('Web URL')
-			.setDesc('URL of the local Agent Web UI.')
-			.addText(text => {
-				text.setPlaceholder('http://localhost:3000')
-					.setValue(config.webURL)
-					.onChange(async (value) => {
-						config.webURL = value;
-						await this.plugin.saveSettings();
-					});
-			});
-
-		new Setting(container)
-			.setName('Request Timeout (ms)')
-			.setDesc('Maximum time to wait for a response.')
-			.addText(text => {
-				text.setValue(String(config.timeoutMs))
-					.onChange(async (value) => {
-						const n = parseInt(value, 10);
-						if (!isNaN(n) && n > 0) {
-							config.timeoutMs = n;
-							await this.plugin.saveSettings();
-						}
 					});
 			});
 	}
@@ -482,8 +438,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 			if (type === 'acp-bridge') {
 				newBackend = createAcpBridgeBackendConfig(id, name);
-			} else if (type === 'embedded-web') {
-				newBackend = createEmbeddedWebBackendConfig(id, name);
 			} else {
 				newBackend = createMockBackendConfig();
 				newBackend.id = id;

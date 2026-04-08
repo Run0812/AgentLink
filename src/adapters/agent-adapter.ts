@@ -29,7 +29,6 @@ export type {
 	BackendType,
 	AgentBackendConfig,
 	AcpBridgeBackendConfig,
-	EmbeddedWebBackendConfig,
 	MockBackendConfig,
 	BackendSummary,
 } from '../core/types';

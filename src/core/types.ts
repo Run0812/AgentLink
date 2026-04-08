@@ -5,7 +5,7 @@
 // ── Backend types ──────────────────────────────────────────────────────
 
 /** Backend implementation types */
-export type BackendType = 'mock' | 'acp-bridge' | 'embedded-web';
+export type BackendType = 'mock' | 'acp-bridge';
 
 /** Configuration for an ACP Bridge backend */
 export interface AcpBridgeBackendConfig {
@@ -34,19 +34,6 @@ export interface AcpBridgeBackendConfig {
 	autoConfirmTools: boolean;
 }
 
-/** Configuration for an Embedded Web backend */
-export interface EmbeddedWebBackendConfig {
-	type: 'embedded-web';
-	/** Unique identifier for this backend */
-	id: string;
-	/** Display name */
-	name: string;
-	/** URL of the local Agent Web UI */
-	webURL: string;
-	/** Request timeout in ms */
-	timeoutMs: number;
-}
-
 /** Configuration for Mock backend */
 export interface MockBackendConfig {
 	type: 'mock';
@@ -57,7 +44,7 @@ export interface MockBackendConfig {
 }
 
 /** Union type for all backend configurations */
-export type AgentBackendConfig = AcpBridgeBackendConfig | EmbeddedWebBackendConfig | MockBackendConfig;
+export type AgentBackendConfig = AcpBridgeBackendConfig | MockBackendConfig;
 
 /** Backend summary for UI display */
 export interface BackendSummary {

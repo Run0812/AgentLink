@@ -14,13 +14,11 @@ import {
 	findBackendConfig,
 	createMockBackendConfig,
 	createKimiBackendConfig,
-	createOpenCodeBackendConfig,
 } from './settings/settings';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { MockAdapter } from './adapters/mock-adapter';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
-import { EmbeddedWebAdapter, EmbeddedWebAdapterConfig } from './adapters/embedded-web-adapter';
 import { parseEnvString, parseBridgeArgs } from './settings/settings';
 
 export default class AgentLinkPlugin extends Plugin {
@@ -121,13 +119,12 @@ export default class AgentLinkPlugin extends Plugin {
 	}
 
 	/**
-	 * Ensure preset backends (Kimi, OpenCode) exist in the configuration.
+	 * Ensure preset backends (Kimi) exist in the configuration.
 	 * Adds them if missing, without overwriting existing user configs.
 	 */
 	private ensurePresetBackends(): void {
 		const presetFactories = [
 			{ id: 'kimi-code', factory: createKimiBackendConfig },
-			{ id: 'opencode-web', factory: createOpenCodeBackendConfig },
 		];
 
 		for (const preset of presetFactories) {
@@ -225,20 +222,11 @@ export default class AgentLinkPlugin extends Plugin {
 			break;
 		}
 
-			case 'embedded-web': {
-				const cfg: EmbeddedWebAdapterConfig = {
-					webURL: backendConfig.webURL,
-					timeoutMs: backendConfig.timeoutMs,
-				};
-				this.adapter = new EmbeddedWebAdapter(cfg);
-				break;
-			}
-
-			default:
-				logger.warn(`AgentLink: unsupported backend type, falling back to mock`);
-				this.adapter = new MockAdapter();
-				break;
-		}
+		default:
+			logger.warn(`AgentLink: unsupported backend type, falling back to mock`);
+			this.adapter = new MockAdapter();
+			break;
+	}
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

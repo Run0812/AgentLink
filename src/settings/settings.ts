@@ -61,17 +61,6 @@ export function createKimiBackendConfig(): AgentBackendConfig {
 	};
 }
 
-/** Create preset OpenCode Web backend config */
-export function createOpenCodeBackendConfig(): AgentBackendConfig {
-	return {
-		type: 'embedded-web',
-		id: 'opencode-web',
-		name: '🔷 OpenCode Web',
-		webURL: 'http://127.0.0.1:3000',
-		timeoutMs: 120000,
-	};
-}
-
 /** Create a default ACP Bridge backend config */
 export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentBackendConfig {
 	return {
@@ -88,23 +77,11 @@ export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentB
 	};
 }
 
-/** Create a default Embedded Web backend config */
-export function createEmbeddedWebBackendConfig(id?: string, name?: string): AgentBackendConfig {
-	return {
-		type: 'embedded-web',
-		id: id || `web-${Date.now()}`,
-		name: name || 'Embedded Web',
-		webURL: 'http://localhost:3000',
-		timeoutMs: 120000,
-	};
-}
-
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
 	activeBackendId: 'mock-default',
 	backends: [
 		createMockBackendConfig(),
 		createKimiBackendConfig(),
-		createOpenCodeBackendConfig(),
 	],
 	requestTimeoutMs: 120000,
 	autoReconnect: false,
@@ -166,8 +143,6 @@ export function getBackendTypeLabel(type: BackendType): string {
 			return 'Mock Agent';
 		case 'acp-bridge':
 			return 'ACP Bridge';
-		case 'embedded-web':
-			return 'Embedded Web';
 		default:
 			return 'Unknown';
 	}
@@ -184,6 +159,6 @@ export function isValidBackendId(id: string): boolean {
  * Generate a unique backend ID.
  */
 export function generateBackendId(type: BackendType): string {
-	const prefix = type === 'acp-bridge' ? 'acp' : type === 'embedded-web' ? 'web' : 'backend';
+	const prefix = type === 'acp-bridge' ? 'acp' : 'backend';
 	return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
