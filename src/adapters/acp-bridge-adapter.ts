@@ -19,6 +19,7 @@ import {
 	StreamHandlers,
 	ToolCall,
 	ToolResult,
+	ConfigOption,
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
@@ -315,6 +316,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// Session
 	private sessionId: string | null = null;
 	private serverCapabilities: AgentCapability[] = [];
+	private configOptions: ConfigOption[] = [];
 	
 	// Streaming handlers
 	private currentHandlers: StreamHandlers | null = null;
@@ -488,6 +490,34 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			return this.serverCapabilities;
 		}
 		return ['chat', 'file_read', 'file_write', 'file_edit', 'terminal'];
+	}
+
+	// ── Config Options (ACP Session Config Options) ────────────────────────
+
+	getConfigOptions(): ConfigOption[] {
+		return this.configOptions;
+	}
+
+	async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
+		console.log('[ACP Adapter] Setting config option:', configId, '=', value);
+		
+		if (!this.connection || !this.sessionId) {
+			throw new Error('Not connected');
+		}
+
+		// Update local configOptions optimistically
+		const option = this.configOptions.find(o => o.id === configId);
+		if (option) {
+			option.currentValue = value;
+			console.log('[ACP Adapter] Config option updated locally');
+			console.log('[ACP Adapter] Updated:', this.configOptions.map(o => `${o.id}=${o.currentValue}`).join(', '));
+		}
+		
+		// Note: Full JSON-RPC call would need SDK support
+		// For now, we update locally and log the attempt
+		console.log('[ACP Adapter] Note: Full setConfigOption JSON-RPC call pending SDK support');
+		
+		return this.configOptions;
 	}
 
 	// ── Tool Execution ───────────────────────────────────────────────────────
@@ -766,6 +796,30 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			console.log('[ACP Adapter] Session ID:', this.sessionId);
 			console.log('[ACP Adapter] Current mode:', response.modes?.currentModeId);
 			console.log('[ACP Adapter] Current model:', response.models?.currentModelId);
+
+			// Store configOptions from session response (ACP Session Config Options)
+			const respAny = response as any;
+			if (respAny.configOptions && respAny.configOptions.length > 0) {
+				this.configOptions = [];
+				for (const opt of respAny.configOptions) {
+					if (opt.type === 'select' && opt.options) {
+						this.configOptions.push({
+							id: opt.id,
+							name: opt.name,
+							description: opt.description ?? undefined,
+							category: (opt.category as any) ?? undefined,
+							type: 'select',
+							currentValue: opt.currentValue,
+							options: opt.options.map((v: any) => ({
+								value: v.value,
+								name: v.name,
+								description: v.description ?? undefined,
+							})),
+						});
+					}
+				}
+				console.log('[ACP Adapter] Config options received:', this.configOptions.map(o => `${o.id}=${o.currentValue}`).join(', '));
+			}
 
 		} catch (error) {
 			console.error('[ACP Adapter] Create session failed:', error);

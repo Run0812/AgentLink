@@ -10,7 +10,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId } from '../core/types';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, ConfigOptionValue } from '../core/types';
 import { CancellationError } from '../core/errors';
 import { logger } from '../core/logger';
 import { SessionStore } from '../services/session-store';
@@ -33,6 +33,7 @@ export class ChatView extends ItemView {
 
 	// ── Saved callbacks so we can call plugin methods ──────────────────
 	private onSettingsRead: () => AgentLinkSettings;
+	private onSettingsSave: () => Promise<void>;
 
 	// ── Tool Executor ──────────────────────────────────────────────────
 	private toolExecutor: ToolExecutor;
@@ -52,20 +53,29 @@ export class ChatView extends ItemView {
 	private historyBtn!: HTMLButtonElement;
 	private newSessionBtn!: HTMLButtonElement;
 	private statusLed!: HTMLElement;
+	private agentSelectorBtn!: HTMLButtonElement; // Agent 选择按钮
+	private modelSelectorBtn!: HTMLButtonElement; // 模型选择按钮
+	private quickConfigBtn!: HTMLButtonElement; // 快捷配置按钮
 
 	// ── Streaming state ────────────────────────────────────────────────
 	private streamingMsgId: string | null = null;
 	private streamingEl: HTMLElement | null = null;
 
+	// ── ACP Session Config ───────────────────────────────────────────────
+	private sessionConfig: SessionConfigState = { configOptions: [] };
+	private configButtonsContainer!: HTMLElement;
+
 	constructor(
 		leaf: WorkspaceLeaf,
 		settings: AgentLinkSettings,
 		onSettingsRead: () => AgentLinkSettings,
+		onSettingsSave: () => Promise<void>,
 		sessionManager: SessionManager,
 	) {
 		super(leaf);
 		this.settings = settings;
 		this.onSettingsRead = onSettingsRead;
+		this.onSettingsSave = onSettingsSave;
 		this.sessionManager = sessionManager;
 		
 		// Initialize ToolExecutor with default config
@@ -139,10 +149,10 @@ export class ChatView extends ItemView {
 	// ── UI construction ────────────────────────────────────────────────
 
 	private buildUI(container: HTMLElement): void {
-		// Header with compact two-row layout (inspired by Terminal.app)
+		// Header with Cursor-style layout
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
 		
-		// Row 1: AgentLink | Status LED + Backend | Actions
+		// Row 1: Agent Selector | Status LED | Backend | Actions
 		const headerRow1 = this.headerEl.createDiv({ cls: 'agentlink-header-row1' });
 		headerRow1.style.display = 'flex';
 		headerRow1.style.alignItems = 'center';
@@ -150,13 +160,47 @@ export class ChatView extends ItemView {
 		headerRow1.style.padding = '0.4rem 0.6rem';
 		headerRow1.style.borderBottom = '1px solid var(--background-modifier-border)';
 		
-		// Left: AgentLink brand
+		// Left: Agent Selector Dropdown (like Cursor)
 		const leftSection = headerRow1.createDiv();
 		leftSection.style.display = 'flex';
 		leftSection.style.alignItems = 'center';
-		leftSection.style.gap = '0.4rem';
-		leftSection.createEl('span', { text: '🤖' });
-		leftSection.createEl('span', { text: 'AgentLink', cls: 'agentlink-brand' });
+		leftSection.style.gap = '0.3rem';
+		
+		// Agent selector button with dropdown
+		const agentContainer = leftSection.createDiv();
+		agentContainer.style.position = 'relative';
+		this.agentSelectorBtn = agentContainer.createEl('button');
+		this.agentSelectorBtn.style.display = 'flex';
+		this.agentSelectorBtn.style.alignItems = 'center';
+		this.agentSelectorBtn.style.gap = '0.3rem';
+		this.agentSelectorBtn.style.padding = '0.3rem 0.5rem';
+		this.agentSelectorBtn.style.background = 'var(--background-secondary)';
+		this.agentSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
+		this.agentSelectorBtn.style.borderRadius = '4px';
+		this.agentSelectorBtn.style.cursor = 'pointer';
+		this.agentSelectorBtn.style.fontSize = '0.85rem';
+		this.agentSelectorBtn.style.color = 'var(--text-normal)';
+		
+		const agentIcon = this.agentSelectorBtn.createEl('span');
+		agentIcon.innerHTML = '🤖';
+		agentIcon.style.fontSize = '0.9rem';
+		const agentText = this.agentSelectorBtn.createEl('span');
+		agentText.textContent = 'Agent';
+		const agentArrow = this.agentSelectorBtn.createEl('span');
+		agentArrow.innerHTML = '▾';
+		agentArrow.style.fontSize = '0.7rem';
+		agentArrow.style.opacity = '0.6';
+		
+		// Agent dropdown
+		const agentDropdown = agentContainer.createDiv();
+		agentDropdown.style.display = 'none';
+		this.agentSelectorBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isOpen = agentDropdown.style.display !== 'none';
+			agentDropdown.style.display = isOpen ? 'none' : 'block';
+			if (!isOpen) this.renderAgentDropdown(agentDropdown);
+		});
+		document.addEventListener('click', () => agentDropdown.style.display = 'none');
 		
 		// Center: Status LED + Backend name
 		const centerSection = headerRow1.createDiv();
@@ -207,19 +251,6 @@ export class ChatView extends ItemView {
 		});
 		document.addEventListener('click', () => historyDropdown.style.display = 'none');
 		
-		// New chat button
-		this.newSessionBtn = rightSection.createEl('button');
-		this.newSessionBtn.innerHTML = '💬';
-		this.newSessionBtn.style.padding = '0.3rem 0.4rem';
-		this.newSessionBtn.style.background = 'transparent';
-		this.newSessionBtn.style.border = 'none';
-		this.newSessionBtn.style.cursor = 'pointer';
-		this.newSessionBtn.style.fontSize = '0.95rem';
-		this.newSessionBtn.style.opacity = '0.7';
-		this.newSessionBtn.addEventListener('mouseenter', () => this.newSessionBtn.style.opacity = '1');
-		this.newSessionBtn.addEventListener('mouseleave', () => this.newSessionBtn.style.opacity = '0.7');
-		this.newSessionBtn.addEventListener('click', () => this.createNewSession());
-		
 		// Clear button
 		this.clearBtn = rightSection.createEl('button');
 		this.clearBtn.innerHTML = '🗑️';
@@ -247,16 +278,23 @@ export class ChatView extends ItemView {
 		
 		// Messages area
 		this.messagesEl = container.createDiv({ cls: 'agentlink-messages' });
+		this.messagesEl.style.flex = '1';
+		this.messagesEl.style.overflowY = 'auto';
+		this.messagesEl.style.padding = '0.75rem';
 		this.initializeSession();
 
-		// Input area with buttons on right side
-		const inputArea = container.createDiv();
-		inputArea.style.display = 'flex';
-		inputArea.style.gap = '0.5rem';
-		inputArea.style.padding = '0.6rem';
-		inputArea.style.borderTop = '1px solid var(--background-modifier-border)';
+		// Input area container
+		const inputContainer = container.createDiv();
+		inputContainer.style.borderTop = '1px solid var(--background-modifier-border)';
+		inputContainer.style.background = 'var(--background-secondary)';
+		
+		// Input row with buttons on right
+		const inputRow = inputContainer.createDiv();
+		inputRow.style.display = 'flex';
+		inputRow.style.gap = '0.5rem';
+		inputRow.style.padding = '0.6rem';
 
-		this.inputEl = inputArea.createEl('textarea', { placeholder: 'Ask your AI agent…' });
+		this.inputEl = inputRow.createEl('textarea', { placeholder: 'Ask your AI agent…' });
 		this.inputEl.style.flex = '1';
 		this.inputEl.style.height = '2.8rem';
 		this.inputEl.style.minHeight = '2.8rem';
@@ -273,7 +311,7 @@ export class ChatView extends ItemView {
 			}
 		});
 
-		const btnCol = inputArea.createDiv();
+		const btnCol = inputRow.createDiv();
 		btnCol.style.display = 'flex';
 		btnCol.style.flexDirection = 'column';
 		btnCol.style.gap = '0.25rem';
@@ -301,6 +339,47 @@ export class ChatView extends ItemView {
 		this.stopBtn.style.display = 'none';
 		this.stopBtn.addEventListener('click', () => this.handleStop());
 
+		// Bottom toolbar: Dynamic configOptions + Quick Config (like Cursor)
+		const bottomToolbar = inputContainer.createDiv();
+		bottomToolbar.style.display = 'flex';
+		bottomToolbar.style.alignItems = 'center';
+		bottomToolbar.style.justifyContent = 'space-between';
+		bottomToolbar.style.padding = '0 0.6rem 0.4rem';
+		bottomToolbar.style.gap = '0.5rem';
+		
+		// Container for dynamic configOptions
+		this.configButtonsContainer = bottomToolbar.createDiv();
+		this.configButtonsContainer.style.display = 'flex';
+		this.configButtonsContainer.style.alignItems = 'center';
+		this.configButtonsContainer.style.gap = '0.3rem';
+		
+		// Right: Quick config buttons (Auto-confirm toggle)
+		const quickConfigContainer = bottomToolbar.createDiv();
+		quickConfigContainer.style.display = 'flex';
+		quickConfigContainer.style.alignItems = 'center';
+		quickConfigContainer.style.gap = '0.3rem';
+		quickConfigContainer.style.marginLeft = 'auto'; // Push to right
+		
+		// Auto-confirm toggle
+		const autoConfirmBtn = quickConfigContainer.createEl('button');
+		autoConfirmBtn.innerHTML = '✓ Auto';
+		autoConfirmBtn.style.padding = '0.2rem 0.4rem';
+		autoConfirmBtn.style.background = this.settings.autoConfirmRead ? 'var(--interactive-accent)' : 'transparent';
+		autoConfirmBtn.style.color = this.settings.autoConfirmRead ? 'var(--text-on-accent)' : 'var(--text-muted)';
+		autoConfirmBtn.style.border = '1px solid var(--background-modifier-border)';
+		autoConfirmBtn.style.borderRadius = '4px';
+		autoConfirmBtn.style.cursor = 'pointer';
+		autoConfirmBtn.style.fontSize = '0.7rem';
+		autoConfirmBtn.addEventListener('click', () => {
+			this.settings.autoConfirmRead = !this.settings.autoConfirmRead;
+			autoConfirmBtn.style.background = this.settings.autoConfirmRead ? 'var(--interactive-accent)' : 'transparent';
+			autoConfirmBtn.style.color = this.settings.autoConfirmRead ? 'var(--text-on-accent)' : 'var(--text-muted)';
+			this.onSettingsSave();
+		});
+
+		// Load and render configOptions from adapter
+		this.loadConfigOptions();
+
 		// Add animation styles
 		if (!document.getElementById('agentlink-animations')) {
 			const style = document.createElement('style');
@@ -315,6 +394,170 @@ export class ChatView extends ItemView {
 		}
 
 		this.refreshStatus();
+	}
+
+	// ── Config Options (Dynamic rendering) ───────────────────────────────────
+
+	/** Load configOptions from adapter and render buttons */
+	private async loadConfigOptions(): Promise<void> {
+		if (!this.adapter) return;
+
+		// Clear existing buttons
+		this.configButtonsContainer.empty();
+
+		// Get configOptions from adapter
+		let configOptions: ConfigOption[] = [];
+		if (this.adapter.getConfigOptions) {
+			configOptions = this.adapter.getConfigOptions();
+		}
+
+		// If no configOptions from adapter, add defaults for display
+		if (configOptions.length === 0) {
+			// Add default mock configOptions for UI demonstration
+			configOptions = [
+				{
+					id: 'model',
+					name: 'Model',
+					category: 'model',
+					type: 'select',
+					currentValue: 'default',
+					options: [
+						{ value: 'default', name: 'Default' },
+						{ value: 'fast', name: 'Fast' },
+						{ value: 'quality', name: 'Quality' },
+					],
+				},
+				{
+					id: 'mode',
+					name: 'Mode',
+					category: 'mode',
+					type: 'select',
+					currentValue: 'ask',
+					options: [
+						{ value: 'ask', name: 'Ask' },
+						{ value: 'code', name: 'Code' },
+						{ value: 'auto', name: 'Auto' },
+					],
+				},
+			];
+		}
+
+		this.sessionConfig = { configOptions };
+
+		// Render a button for each configOption
+		for (const option of configOptions) {
+			this.renderConfigOptionButton(option);
+		}
+	}
+
+	/** Render a single configOption as a dropdown button */
+	private renderConfigOptionButton(option: ConfigOption): void {
+		const container = this.configButtonsContainer.createDiv();
+		container.style.position = 'relative';
+
+		const btn = container.createEl('button');
+		btn.style.display = 'flex';
+		btn.style.alignItems = 'center';
+		btn.style.gap = '0.2rem';
+		btn.style.padding = '0.2rem 0.4rem';
+		btn.style.background = 'transparent';
+		btn.style.border = '1px solid var(--background-modifier-border)';
+		btn.style.borderRadius = '4px';
+		btn.style.cursor = 'pointer';
+		btn.style.fontSize = '0.7rem';
+		btn.style.color = 'var(--text-muted)';
+
+		// Icon based on category
+		let icon = '⚙️';
+		if (option.category === 'mode') icon = '🛡️';
+		else if (option.category === 'model') icon = '⚡';
+		else if (option.category === 'thought_level') icon = '💭';
+
+		const iconSpan = btn.createEl('span');
+		iconSpan.innerHTML = icon;
+
+		// Current value display
+		const currentOpt = option.options.find((o: ConfigOptionValue) => o.value === option.currentValue);
+		const valueSpan = btn.createEl('span');
+		valueSpan.textContent = currentOpt?.name || option.currentValue;
+
+		const arrowSpan = btn.createEl('span');
+		arrowSpan.innerHTML = '▾';
+		arrowSpan.style.fontSize = '0.6rem';
+
+		// Dropdown container
+		const dropdown = container.createDiv();
+		dropdown.style.display = 'none';
+		dropdown.style.position = 'absolute';
+		dropdown.style.bottom = '100%';
+		dropdown.style.left = '0';
+		dropdown.style.zIndex = '1000';
+		dropdown.style.minWidth = '140px';
+		dropdown.style.padding = '0.3rem';
+		dropdown.style.background = 'var(--background-primary)';
+		dropdown.style.border = '1px solid var(--background-modifier-border)';
+		dropdown.style.borderRadius = '4px';
+		dropdown.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+		dropdown.style.marginBottom = '0.3rem';
+
+		// Render options
+		for (const opt of option.options) {
+			const item = dropdown.createEl('button');
+			item.type = 'button';
+			item.style.display = 'block';
+			item.style.width = '100%';
+			item.style.padding = '0.3rem 0.5rem';
+			item.style.marginBottom = '0.15rem';
+			item.style.border = 'none';
+			item.style.borderRadius = '3px';
+			item.style.background = opt.value === option.currentValue ? 'var(--background-modifier-hover)' : 'transparent';
+			item.style.color = 'var(--text-normal)';
+			item.style.textAlign = 'left';
+			item.style.cursor = 'pointer';
+			item.style.fontSize = '0.75rem';
+
+			item.createEl('span', { text: opt.name });
+			if (opt.description) {
+				item.createEl('span', { 
+					text: opt.description,
+					cls: 'agentlink-dropdown-desc',
+				}).style.display = 'block';
+				item.style.fontSize = '0.7rem';
+			}
+
+			item.addEventListener('click', async () => {
+				dropdown.style.display = 'none';
+				
+				// Update button display
+				valueSpan.textContent = opt.name;
+
+				// Update config option via adapter
+				if (this.adapter?.setConfigOption) {
+					try {
+						await this.adapter.setConfigOption(option.id, opt.value);
+						new Notice(`${option.name}: ${opt.name}`);
+					} catch (error) {
+						logger.error('Failed to set config option:', error);
+					}
+				}
+
+				// Update local state
+				option.currentValue = opt.value;
+				this.sessionConfig = { 
+					configOptions: this.sessionConfig.configOptions.map(o => 
+						o.id === option.id ? { ...o, currentValue: opt.value } : o
+					)
+				};
+			});
+		}
+
+		// Toggle dropdown
+		btn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isOpen = dropdown.style.display !== 'none';
+			dropdown.style.display = isOpen ? 'none' : 'block';
+		});
+		document.addEventListener('click', () => dropdown.style.display = 'none');
 	}
 
 	// ── Message sending ────────────────────────────────────────────────
@@ -1132,6 +1375,242 @@ export class ChatView extends ItemView {
 			});
 		
 		modal.open();
+	}
+
+	/** Render Agent selector dropdown */
+	private renderAgentDropdown(container: HTMLElement): void {
+		const backends = this.settings.backends;
+		const activeBackend = getActiveBackendConfig(this.settings);
+
+		container.empty();
+		container.style.display = 'block';
+		container.style.position = 'absolute';
+		container.style.top = '100%';
+		container.style.left = '0';
+		container.style.zIndex = '1000';
+		container.style.minWidth = '200px';
+		container.style.maxWidth = '280px';
+		container.style.maxHeight = '300px';
+		container.style.overflowY = 'auto';
+		container.style.padding = '0.4rem';
+		container.style.background = 'var(--background-primary)';
+		container.style.border = '1px solid var(--background-modifier-border)';
+		container.style.borderRadius = '6px';
+		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+
+		const header = container.createEl('div', { text: 'Select Agent' });
+		header.style.fontSize = '0.75rem';
+		header.style.color = 'var(--text-muted)';
+		header.style.padding = '0.3rem 0.5rem';
+		header.style.marginBottom = '0.3rem';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		for (const backend of backends) {
+			const item = container.createEl('button');
+			item.type = 'button';
+			item.style.width = '100%';
+			item.style.display = 'flex';
+			item.style.alignItems = 'center';
+			item.style.gap = '0.4rem';
+			item.style.padding = '0.5rem';
+			item.style.marginBottom = '0.2rem';
+			item.style.border = 'none';
+			item.style.borderRadius = '4px';
+			item.style.background = backend.id === activeBackend?.id
+				? 'var(--background-modifier-hover)'
+				: 'transparent';
+			item.style.color = 'var(--text-normal)';
+			item.style.textAlign = 'left';
+			item.style.cursor = 'pointer';
+
+			const icon = item.createEl('span');
+			icon.innerHTML = backend.type === 'mock' ? '🧪' : '🤖';
+			icon.style.fontSize = '0.9rem';
+
+			const name = item.createEl('span', { text: backend.name });
+			name.style.flex = '1';
+			name.style.fontSize = '0.85rem';
+
+			if (backend.id === activeBackend?.id) {
+				const check = item.createEl('span');
+				check.innerHTML = '✓';
+				check.style.color = 'var(--interactive-accent)';
+				check.style.fontWeight = 'bold';
+			}
+
+			item.addEventListener('click', async () => {
+				if (backend.id !== this.settings.activeBackendId) {
+					this.settings.activeBackendId = backend.id;
+					await this.onSettingsSave();
+					this.refreshStatus();
+					new Notice(`Switched to ${backend.name}`);
+				}
+				container.style.display = 'none';
+			});
+		}
+	}
+
+	/** Render Model selector dropdown */
+	private renderModelDropdown(container: HTMLElement): void {
+		container.empty();
+		container.style.display = 'block';
+		container.style.position = 'absolute';
+		container.style.bottom = '100%';
+		container.style.left = '0';
+		container.style.zIndex = '1000';
+		container.style.minWidth = '180px';
+		container.style.maxWidth = '260px';
+		container.style.padding = '0.4rem';
+		container.style.background = 'var(--background-primary)';
+		container.style.border = '1px solid var(--background-modifier-border)';
+		container.style.borderRadius = '6px';
+		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+		container.style.marginBottom = '0.3rem';
+
+		const header = container.createEl('div', { text: 'Model' });
+		header.style.fontSize = '0.75rem';
+		header.style.color = 'var(--text-muted)';
+		header.style.padding = '0.3rem 0.5rem';
+		header.style.marginBottom = '0.3rem';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		const models = [
+			{ id: 'default', name: 'Default', desc: 'Use backend default' },
+			{ id: 'fast', name: 'Fast', desc: 'Quicker responses' },
+			{ id: 'quality', name: 'Quality', desc: 'Better responses' },
+		];
+
+		for (const model of models) {
+			const item = container.createEl('button');
+			item.type = 'button';
+			item.style.width = '100%';
+			item.style.display = 'block';
+			item.style.padding = '0.5rem';
+			item.style.marginBottom = '0.2rem';
+			item.style.border = 'none';
+			item.style.borderRadius = '4px';
+			item.style.background = 'transparent';
+			item.style.color = 'var(--text-normal)';
+			item.style.textAlign = 'left';
+			item.style.cursor = 'pointer';
+
+			const name = item.createEl('div', { text: model.name });
+			name.style.fontSize = '0.85rem';
+			name.style.fontWeight = '600';
+
+			const desc = item.createEl('div', { text: model.desc });
+			desc.style.fontSize = '0.75rem';
+			desc.style.color = 'var(--text-muted)';
+
+			item.addEventListener('click', () => {
+				const btnText = this.modelSelectorBtn.querySelector('span:nth-child(2)');
+				if (btnText) btnText.textContent = model.name;
+				container.style.display = 'none';
+				new Notice(`Model: ${model.name}`);
+			});
+		}
+
+		const configureItem = container.createEl('button');
+		configureItem.type = 'button';
+		configureItem.style.width = '100%';
+		configureItem.style.display = 'block';
+		configureItem.style.padding = '0.5rem';
+		configureItem.style.marginTop = '0.3rem';
+		configureItem.style.border = 'none';
+		configureItem.style.borderTop = '1px solid var(--background-modifier-border)';
+		configureItem.style.borderRadius = '0';
+		configureItem.style.background = 'transparent';
+		configureItem.style.color = 'var(--text-muted)';
+		configureItem.style.textAlign = 'left';
+		configureItem.style.cursor = 'pointer';
+		configureItem.style.fontSize = '0.8rem';
+		configureItem.textContent = 'Configure...';
+		configureItem.addEventListener('click', () => {
+			container.style.display = 'none';
+			// @ts-ignore
+			this.app.setting.open();
+			// @ts-ignore
+			this.app.setting.openTabById('agentlink');
+		});
+	}
+
+	/** Render Thinking intensity dropdown */
+	private renderThinkingDropdown(container: HTMLElement, triggerBtn: HTMLButtonElement): void {
+		const modes: { id: 'none' | 'quick' | 'balanced' | 'deep'; name: string; desc: string }[] = [
+			{ id: 'none', name: 'None', desc: 'No thinking process' },
+			{ id: 'quick', name: 'Quick', desc: 'Fast responses' },
+			{ id: 'balanced', name: 'Balanced', desc: 'Default mode' },
+			{ id: 'deep', name: 'Deep', desc: 'Deep analysis' },
+		];
+
+		container.empty();
+		container.style.display = 'block';
+		container.style.position = 'absolute';
+		container.style.bottom = '100%';
+		container.style.right = '0';
+		container.style.zIndex = '1000';
+		container.style.minWidth = '160px';
+		container.style.padding = '0.4rem';
+		container.style.background = 'var(--background-primary)';
+		container.style.border = '1px solid var(--background-modifier-border)';
+		container.style.borderRadius = '6px';
+		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+		container.style.marginBottom = '0.3rem';
+
+		const header = container.createEl('div', { text: 'Thinking' });
+		header.style.fontSize = '0.75rem';
+		header.style.color = 'var(--text-muted)';
+		header.style.padding = '0.3rem 0.5rem';
+		header.style.marginBottom = '0.3rem';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		for (const mode of modes) {
+			const item = container.createEl('button');
+			item.type = 'button';
+			item.style.width = '100%';
+			item.style.display = 'flex';
+			item.style.flexDirection = 'column';
+			item.style.padding = '0.5rem';
+			item.style.marginBottom = '0.2rem';
+			item.style.border = 'none';
+			item.style.borderRadius = '4px';
+			item.style.background = mode.id === this.settings.thinkingMode
+				? 'var(--background-modifier-hover)'
+				: 'transparent';
+			item.style.color = 'var(--text-normal)';
+			item.style.textAlign = 'left';
+			item.style.cursor = 'pointer';
+
+			const nameRow = item.createEl('div');
+			nameRow.style.display = 'flex';
+			nameRow.style.alignItems = 'center';
+			nameRow.style.gap = '0.4rem';
+
+			const name = nameRow.createEl('span', { text: mode.name });
+			name.style.fontSize = '0.85rem';
+			name.style.fontWeight = '600';
+
+			if (mode.id === this.settings.thinkingMode) {
+				const check = nameRow.createEl('span');
+				check.innerHTML = '✓';
+				check.style.color = 'var(--interactive-accent)';
+				check.style.fontWeight = 'bold';
+			}
+
+			const desc = item.createEl('div', { text: mode.desc });
+			desc.style.fontSize = '0.75rem';
+			desc.style.color = 'var(--text-muted)';
+
+			item.addEventListener('click', async () => {
+				this.settings.thinkingMode = mode.id;
+				await this.onSettingsSave();
+				// Update button appearance
+				triggerBtn.innerHTML = `💭 ${mode.name} ▾`;
+				triggerBtn.style.background = mode.id !== 'none' ? 'var(--interactive-accent)' : 'transparent';
+				triggerBtn.style.color = mode.id !== 'none' ? 'var(--text-on-accent)' : 'var(--text-muted)';
+				container.style.display = 'none';
+			});
+		}
 	}
 
 	/** Render inline history dropdown */

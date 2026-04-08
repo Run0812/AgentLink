@@ -54,6 +54,34 @@ export interface BackendSummary {
 	connected: boolean;
 }
 
+// ── ACP Session Config Options ─────────────────────────────────────────
+
+/** Config option category for UX consistency */
+export type ConfigOptionCategory = 'mode' | 'model' | 'thought_level' | `_${string}`;
+
+/** Config option value */
+export interface ConfigOptionValue {
+	value: string;
+	name: string;
+	description?: string;
+}
+
+/** Config option definition from ACP Agent */
+export interface ConfigOption {
+	id: string;
+	name: string;
+	description?: string;
+	category?: ConfigOptionCategory;
+	type: 'select';
+	currentValue: string;
+	options: ConfigOptionValue[];
+}
+
+/** Session configuration state */
+export interface SessionConfigState {
+	configOptions: ConfigOption[];
+}
+
 // ── Message types ──────────────────────────────────────────────────────
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'error' | 'status' | 'tool_call' | 'file_edit' | 'thinking';
@@ -348,6 +376,11 @@ export interface AgentAdapter {
 	getCapabilities(): AgentCapability[];
 	/** Execute a tool call and return result (optional, for adapters that support tool execution) */
 	executeTool?(call: ToolCall): Promise<ToolResult>;
+
+	/** Get configuration options from the agent (ACP configOptions). Returns empty array if not supported. */
+	getConfigOptions?(): ConfigOption[];
+	/** Set a configuration option value. Returns updated configOptions on success. */
+	setConfigOption?(configId: string, value: string): Promise<ConfigOption[]>;
 }
 
 // ── Utility ────────────────────────────────────────────────────────────

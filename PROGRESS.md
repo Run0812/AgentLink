@@ -1,7 +1,111 @@
 # AgentLink 开发进展记录
 
 > 最后更新: 2026-04-08
-> 更新内容: UI 布局重构 - Terminal 风格头部
+> 更新内容: ACP Session Config Options 动态渲染完成
+
+---
+
+### 2026-04-08 - ACP Session Config Options ✅
+
+**基于 ACP 协议实现的动态底部工具栏**（参考 https://agentclientprotocol.com/protocol/session-config-options）：
+
+- ✅ **AgentAdapter 接口扩展**
+  - 新增 `getConfigOptions(): ConfigOption[]` 方法
+  - 新增 `setConfigOption(configId, value): Promise<ConfigOption[]>` 方法
+
+- ✅ **ACP Bridge Adapter 实现**
+  - 从 session 响应中解析 configOptions
+  - 实现本地状态更新（完整 JSON-RPC 调用待 SDK 支持）
+  - 存储 mode/model/thought_level 配置
+
+- ✅ **Mock Adapter 测试支持**
+  - 内置默认 configOptions：
+    - mode: Ask / Code / Auto
+    - model: Default / Fast / Quality
+    - thought_level: None / Quick / Balanced / Deep
+
+- ✅ **ChatView 动态渲染**
+  - 底部工具栏根据 Agent 返回的 configOptions 动态生成
+  - 每个 configOption 渲染为下拉选择按钮
+  - 图标根据 category 自动识别：
+    - 🛡️ mode
+    - ⚡ model
+    - 💭 thought_level
+  - 点击选项调用 `adapter.setConfigOption()`
+
+- ✅ **ACP 协议支持**
+  - Session Config Options 优先于旧的 modes API
+  - 支持 config_option_update 通知（会话期间动态更新）
+  - 配置选项顺序反映 Agent 优先级
+
+**UI 布局**：
+```
+┌────────────────────────────────────────────┐
+│ 🤖 Agent ▾      [🟢] Backend    📜 🗑    │
+│ Session Title                          │
+├────────────────────────────────────────────┤
+│                                          │
+│   Messages...                            │
+│                                          │
+├────────────────────────────────────────────┤
+│ [🛡️ Ask ▾] [⚡ Default ▾]     [✓ Auto]  │
+└────────────────────────────────────────────┘
+```
+
+---
+
+### 2026-04-08 - Phase 4: 快速切换功能 ✅
+
+**新增功能（类似 Cursor AI 的界面）**：
+
+- ✅ **Agent 选择下拉按钮**
+  - 头部左侧显示 "🤖 Agent ▾" 按钮
+  - 下拉列表显示所有已配置的 Agent
+  - 当前 Agent 高亮显示 ✓
+  - 点击切换 Agent，自动保存设置
+  - 显示 Agent 类型图标（🧪 mock / 🤖 标准）
+
+- ✅ **模型选择按钮**
+  - 输入框底部工具栏左侧
+  - 显示 "⚡ Model ▾"
+  - 下拉选项：Default / Fast / Quality
+  - 底部有 "Configure..." 链接到设置页
+
+- ✅ **快捷配置按钮**
+  - 底部工具栏中间：
+    - ✓ Auto（自动确认只读操作）
+    - 💭 Think（显示思考过程）
+  - 点击切换开关状态，实时保存
+  - 使用主题色高亮激活状态
+
+- ✅ **设置快捷入口**
+  - 底部工具栏右侧：⚙️ 按钮
+  - 一键打开插件设置页
+
+**UI 布局**（Cursor 风格）：
+```
+┌────────────────────────────────────────────┐
+│ 🤖 Agent ▾    [🟢] BackendName    📜💬🗑 │
+│ Session Title                              │
+├────────────────────────────────────────────┤
+│                                            │
+│   Welcome to AgentLink!                    │
+│                                            │
+├────────────────────────────────────────────┤
+│ [Input textarea                ] [Send]    │
+│                                  [Stop]    │
+├────────────────────────────────────────────┤
+│ ⚡ Model ▾  [✓ Auto] [💭 Think]      ⚙️   │
+└────────────────────────────────────────────┘
+```
+
+**文件变更**:
+- `src/ui/chat-view.ts`:
+  - 重写 `buildUI()`: Cursor 风格头部 + 底部工具栏
+  - 添加 `renderAgentDropdown()`: Agent 选择下拉
+  - 添加 `renderModelDropdown()`: 模型选择下拉
+  - 添加 `onSettingsSave` 回调支持
+- `src/main.ts`: 更新 ChatView 构造函数，传递 `onSettingsSave`
 
 ---
 

@@ -9,6 +9,7 @@ import {
 	ToolCall,
 	ToolResult,
 	TOOL_METADATA,
+	ConfigOption,
 } from '../core/types';
 import { logger } from '../core/logger';
 
@@ -50,6 +51,48 @@ export class MockAdapter implements AgentAdapter {
 	private currentTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingToolCall: ToolCall | null = null;
 	private lastToolResult: ToolResult | null = null;
+	private configOptions: ConfigOption[] = [
+		{
+			id: 'mode',
+			name: 'Session Mode',
+			description: 'Controls how the agent requests permission',
+			category: 'mode',
+			type: 'select',
+			currentValue: 'ask',
+			options: [
+				{ value: 'ask', name: 'Ask', description: 'Request permission before making any changes' },
+				{ value: 'code', name: 'Code', description: 'Write and modify code with full tool access' },
+				{ value: 'auto', name: 'Auto', description: 'Automatically confirm safe operations' },
+			],
+		},
+		{
+			id: 'model',
+			name: 'Model',
+			description: 'Choose which model to use',
+			category: 'model',
+			type: 'select',
+			currentValue: 'default',
+			options: [
+				{ value: 'default', name: 'Default', description: 'Use the default model' },
+				{ value: 'fast', name: 'Fast', description: 'Fast responses, lower quality' },
+				{ value: 'quality', name: 'Quality', description: 'Best quality, slower responses' },
+			],
+		},
+		{
+			id: 'thought_level',
+			name: 'Thinking Level',
+			description: 'How much reasoning to show',
+			category: 'thought_level',
+			type: 'select',
+			currentValue: 'balanced',
+			options: [
+				{ value: 'none', name: 'None', description: 'No thinking process' },
+				{ value: 'quick', name: 'Quick', description: 'Brief thinking summary' },
+				{ value: 'balanced', name: 'Balanced', description: 'Standard thinking process' },
+				{ value: 'deep', name: 'Deep', description: 'Detailed reasoning' },
+			],
+		},
+	];
 
 	async connect(): Promise<void> {
 		this.state = 'connecting';
@@ -133,6 +176,31 @@ export class MockAdapter implements AgentAdapter {
 
 	getCapabilities(): AgentCapability[] {
 		return ['chat', 'file_read', 'file_write', 'file_edit'];
+	}
+
+	// ── Config Options (ACP Session Config Options) ────────────────────────
+
+	getConfigOptions(): ConfigOption[] {
+		return this.configOptions;
+	}
+
+	async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
+		logger.debug('MockAdapter: setConfigOption', configId, '=', value);
+		
+		const option = this.configOptions.find(o => o.id === configId);
+		if (!option) {
+			throw new Error(`Config option not found: ${configId}`);
+		}
+
+		const optionValue = option.options.find(v => v.value === value);
+		if (!optionValue) {
+			throw new Error(`Invalid value for ${configId}: ${value}`);
+		}
+
+		option.currentValue = value;
+		logger.debug('MockAdapter: config option updated:', configId, '=', value);
+		
+		return this.configOptions;
 	}
 
 	async executeTool(call: ToolCall): Promise<ToolResult> {

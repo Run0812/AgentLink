@@ -986,3 +986,4 @@ MockAdapter 需要模拟：
 1. 每阶段必须将开发进度写入PROGRESS.md
 2. 在PLAN.md 中保留当前的开发待完成项
 3. 每一阶段结束后build产物需要拷贝到dev\.obsidian\plugins\agentlink下供我测试
+4. **必须多参考 ACP 官方文档**: 开发涉及 ACP 协议的功能时，必须查阅 https://agentclientprotocol.com 官方文档，确保实现符合最新协议规范

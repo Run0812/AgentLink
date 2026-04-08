@@ -32,6 +32,8 @@ export interface AgentLinkSettings {
 	autoConfirmEdit: boolean;
 	/** Show agent thinking process. */
 	showThinking: boolean;
+	/** Thinking intensity mode: none/quick/balanced/deep */
+	thinkingMode: 'none' | 'quick' | 'balanced' | 'deep';
 }
 
 /** Create a default Mock backend config */
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
 	autoConfirmRead: true,
 	autoConfirmEdit: false,
 	showThinking: true,
+	thinkingMode: 'balanced',
 };
 
 /**

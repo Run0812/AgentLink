@@ -43,7 +43,13 @@ export default class AgentLinkPlugin extends Plugin {
 
 		// Register the custom sidebar view
 		this.registerView(AGENTLINK_VIEW_TYPE, (leaf) => {
-			const view = new ChatView(leaf, this.settings, () => this.settings, this.sessionManager);
+			const view = new ChatView(
+				leaf, 
+				this.settings, 
+				() => this.settings, 
+				async () => { await this.saveSettings(); },
+				this.sessionManager
+			);
 			if (this.adapter) view.setAdapter(this.adapter);
 			return view;
 		});
