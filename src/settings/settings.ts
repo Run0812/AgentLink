@@ -60,39 +60,37 @@ export function createMockBackendConfig(): AgentBackendConfig {
 export function createKimiBackendConfig(): AgentBackendConfig {
 	return {
 		type: 'acp-bridge',
-		id: 'kimi-code',
-		name: '🌙 Kimi Code (ACP)',
-		bridgeCommand: 'kimi',
-		bridgeArgs: 'acp',
-		// Note: Kimi CLI uses stdio for ACP, no URL needed
-		workspaceRoot: '',
-		env: '',
-		timeoutMs: 120000,
-		autoConfirmTools: false,
+		id: 'kimi',
+		name: '🌙 Kimi Code',
+		command: 'kimi',
+		args: ['acp'],
+		registryAgentId: 'kimi',
 	};
 }
 
 /** Create a default ACP Bridge backend config */
-export function createAcpBridgeBackendConfig(id?: string, name?: string): AgentBackendConfig {
+export function createAcpBridgeBackendConfig(
+	id?: string,
+	name?: string,
+	command?: string,
+	args?: string[],
+	registryAgentId?: string
+): AgentBackendConfig {
 	return {
 		type: 'acp-bridge',
 		id: id || `acp-${Date.now()}`,
 		name: name || 'ACP Bridge',
-		bridgeCommand: '',
-		bridgeArgs: '',
-		// acpServerURL is optional - only needed for HTTP/WebSocket bridges
-		workspaceRoot: '',
-		env: '',
-		timeoutMs: 120000,
-		autoConfirmTools: false,
+		command: command || '',
+		args: args || [],
+		registryAgentId,
 	};
 }
 
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
   activeBackendId: 'mock-default',
   backends: [
-    createMockBackendConfig(),
-    createKimiBackendConfig(),
+			createMockBackendConfig(),
+			createKimiBackendConfig(),
   ],
   // ── Registry settings ────────────────────────────────────────
   enableAcpRegistrySync: true,
@@ -109,33 +107,6 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
   showThinking: true,
   thinkingMode: 'balanced',
 };
-
-/**
- * Parse the "env" setting (multi-line KEY=VALUE) into a Record.
- */
-export function parseEnvString(raw: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const line of raw.split('\n')) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith('#')) continue;
-		const eqIdx = trimmed.indexOf('=');
-		if (eqIdx > 0) {
-			result[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim();
-		}
-	}
-	return result;
-}
-
-/**
- * Parse bridge args from string to array.
- */
-export function parseBridgeArgs(raw: string): string[] {
-	if (!raw.trim()) return [];
-	return raw
-		.trim()
-		.split(/\s+/)
-		.filter(Boolean);
-}
 
 /**
  * Find a backend config by ID.

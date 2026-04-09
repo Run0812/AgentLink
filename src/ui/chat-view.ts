@@ -1267,7 +1267,7 @@ export class ChatView extends ItemView {
 
 	/** Render Agent selector dropdown */
 	private renderAgentDropdown(container: HTMLElement): void {
-		const backends = this.settings.backends;
+		const backends = this.settings.backends.filter(b => b.enabled !== false);
 		const activeBackend = getActiveBackendConfig(this.settings);
 
 		container.empty();
@@ -1292,6 +1292,16 @@ export class ChatView extends ItemView {
 		header.style.padding = '0.3rem 0.5rem';
 		header.style.marginBottom = '0.3rem';
 		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+
+		// Show message if no enabled backends
+		if (backends.length === 0) {
+			const emptyMsg = container.createEl('div', { text: 'No enabled agents. Enable agents in settings.' });
+			emptyMsg.style.padding = '0.75rem';
+			emptyMsg.style.color = 'var(--text-muted)';
+			emptyMsg.style.fontSize = '0.85rem';
+			emptyMsg.style.textAlign = 'center';
+			return;
+		}
 
 		for (const backend of backends) {
 			const item = container.createEl('button');

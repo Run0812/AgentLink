@@ -5,13 +5,11 @@ describe('AcpBridgeAdapter', () => {
 	let adapter: AcpBridgeAdapter;
 
 	const defaultConfig: AcpBridgeAdapterConfig = {
-		bridgeCommand: '',
-		bridgeArgs: [],
-		acpServerURL: 'http://localhost:8080',
-		workspaceRoot: '/test',
-		env: {},
-		timeoutMs: 120000,
-		autoConfirmTools: false,
+		type: 'acp-bridge',
+		id: 'test-acp',
+		name: 'Test ACP Agent',
+		command: '',
+		args: [],
 	};
 
 	beforeEach(() => {
@@ -47,7 +45,7 @@ describe('AcpBridgeAdapter', () => {
 	});
 
 	describe('executeTool', () => {
-		it('returns not implemented (Phase 3)', async () => {
+		it('returns not implemented message', async () => {
 			const result = await adapter.executeTool({
 				id: 'test',
 				tool: 'read_file',
@@ -55,15 +53,14 @@ describe('AcpBridgeAdapter', () => {
 			});
 
 			expect(result.success).toBe(false);
-			expect(result.content).toContain('not implemented');
+			expect(result.content).toContain('ToolExecutor');
 		});
 	});
 
 	describe('updateConfig', () => {
-		it('updates configuration', () => {
-			adapter.updateConfig({ timeoutMs: 5000 });
-			// Config is private, but we can test behavior changes
-			// For now, just ensure no errors
+		it('updates configuration without errors', () => {
+			adapter.updateConfig({ name: 'Updated Name' });
+			// Config is private, but we can test no errors are thrown
 		});
 	});
 });

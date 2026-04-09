@@ -1,38 +1,71 @@
 import { describe, it, expect } from 'vitest';
-import { parseEnvString, parseBridgeArgs } from '../../src/settings/settings';
+import { createMockBackendConfig, createKimiBackendConfig, createAcpBridgeBackendConfig, isValidBackendId, generateBackendId } from '../../src/settings/settings';
 
-describe('parseEnvString', () => {
-	it('parses KEY=VALUE pairs', () => {
-		const result = parseEnvString('FOO=bar\nBAZ=qux');
-		expect(result).toEqual({ FOO: 'bar', BAZ: 'qux' });
-	});
-
-	it('ignores empty lines and comments', () => {
-		const result = parseEnvString('# comment\n\nKEY=val\n  \n#another');
-		expect(result).toEqual({ KEY: 'val' });
-	});
-
-	it('handles values with = sign', () => {
-		const result = parseEnvString('KEY=a=b=c');
-		expect(result).toEqual({ KEY: 'a=b=c' });
-	});
-
-	it('returns empty object for empty input', () => {
-		expect(parseEnvString('')).toEqual({});
+describe('createMockBackendConfig', () => {
+	it('creates a mock backend with default values', () => {
+		const config = createMockBackendConfig();
+		expect(config.type).toBe('mock');
+		expect(config.id).toBe('mock-default');
+		expect(config.name).toBe('Mock Agent (Test)');
 	});
 });
 
-describe('parseBridgeArgs', () => {
-	it('splits space-separated arguments', () => {
-		expect(parseBridgeArgs('-p --verbose')).toEqual(['-p', '--verbose']);
+describe('createKimiBackendConfig', () => {
+	it('creates Kimi backend with correct command and args', () => {
+		const config = createKimiBackendConfig();
+		expect(config.type).toBe('acp-bridge');
+		expect(config.id).toBe('kimi');
+		expect(config.command).toBe('kimi');
+		expect(config.args).toEqual(['acp']);
+		expect(config.registryAgentId).toBe('kimi');
+	});
+});
+
+describe('createAcpBridgeBackendConfig', () => {
+	it('creates config with provided values', () => {
+		const config = createAcpBridgeBackendConfig('test-id', 'Test Agent', 'my-agent', ['--arg1', '--arg2'], 'registry-id');
+		expect(config.type).toBe('acp-bridge');
+		expect(config.id).toBe('test-id');
+		expect(config.name).toBe('Test Agent');
+		expect(config.command).toBe('my-agent');
+		expect(config.args).toEqual(['--arg1', '--arg2']);
+		expect(config.registryAgentId).toBe('registry-id');
 	});
 
-	it('returns empty array for empty input', () => {
-		expect(parseBridgeArgs('')).toEqual([]);
-		expect(parseBridgeArgs('   ')).toEqual([]);
+	it('creates config with default values when optional params omitted', () => {
+		const config = createAcpBridgeBackendConfig();
+		expect(config.type).toBe('acp-bridge');
+		expect(config.id).toMatch(/^acp-/);
+		expect(config.name).toBe('ACP Bridge');
+		expect(config.command).toBe('');
+		expect(config.args).toEqual([]);
+	});
+});
+
+describe('isValidBackendId', () => {
+	it('returns true for valid IDs', () => {
+		expect(isValidBackendId('my-backend')).toBe(true);
+		expect(isValidBackendId('my_backend')).toBe(true);
+		expect(isValidBackendId('my-backend-123')).toBe(true);
+		expect(isValidBackendId('a')).toBe(true);
 	});
 
-	it('trims leading/trailing whitespace', () => {
-		expect(parseBridgeArgs('  -a -b  ')).toEqual(['-a', '-b']);
+	it('returns false for invalid IDs', () => {
+		expect(isValidBackendId('')).toBe(false);
+		expect(isValidBackendId('my backend')).toBe(false);
+		expect(isValidBackendId('my.backend')).toBe(false);
+		expect(isValidBackendId('my@backend')).toBe(false);
+	});
+});
+
+describe('generateBackendId', () => {
+	it('generates acp-bridge ID with prefix', () => {
+		const id = generateBackendId('acp-bridge');
+		expect(id).toMatch(/^acp-\d+/);
+	});
+
+	it('generates mock ID with default prefix', () => {
+		const id = generateBackendId('mock');
+		expect(id).toMatch(/^backend-\d+/);
 	});
 });

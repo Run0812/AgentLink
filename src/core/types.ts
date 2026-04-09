@@ -10,28 +10,36 @@ export type BackendType = 'mock' | 'acp-bridge';
 /** Configuration for an ACP Bridge backend */
 export interface AcpBridgeBackendConfig {
 	type: 'acp-bridge';
-	/** Unique identifier for this backend */
+	/** Unique identifier for this backend (agent ID from registry, e.g., 'kimi', 'claude-acp') */
 	id: string;
 	/** Display name */
 	name: string;
-	/** Bridge command to start (e.g., 'kimi', 'claude', 'acp-bridge') */
-	bridgeCommand: string;
-	/** Arguments for bridge command (space-separated string for UI, parsed to array for execution) */
-	bridgeArgs: string;
-	/** 
-	 * Optional: ACP Server URL for HTTP/WebSocket-based bridges.
-	 * Most ACP implementations (like Kimi CLI) use stdio and don't need this.
-	 * Only required if your bridge uses HTTP/WebSocket transport.
+	/**
+	 * Command to start the agent.
+	 * Can be just the command name (if in PATH) or full path to executable.
+	 * Examples: 'kimi', '/usr/local/bin/kimi', 'npx @scope/package'
 	 */
-	acpServerURL?: string;
-	/** Workspace root directory (empty = use vault root) */
-	workspaceRoot: string;
-	/** Environment variables (KEY=VALUE format, one per line) */
-	env: string;
-	/** Request timeout in ms */
-	timeoutMs: number;
-	/** Auto-confirm tool calls (DANGEROUS - use with caution) */
-	autoConfirmTools: boolean;
+	command: string;
+	/**
+	 * Arguments for the command.
+	 * Auto-populated from registry, can be customized by user.
+	 */
+	args: string[];
+	/**
+	 * Detected agent version (e.g., '1.30.0').
+	 * Auto-detected by running 'command --version' or similar.
+	 */
+	version?: string;
+	/**
+	 * Original registry agent ID.
+	 * Used to re-fetch registry info if needed.
+	 */
+	registryAgentId?: string;
+	/**
+	 * Whether this backend is enabled (shown in sidebar dropdown).
+	 * Disabled backends are not selectable in the chat view.
+	 */
+	enabled?: boolean;
 }
 
 /** Configuration for Mock backend */
@@ -41,6 +49,11 @@ export interface MockBackendConfig {
 	id: string;
 	/** Display name */
 	name: string;
+	/**
+	 * Whether this backend is enabled (shown in sidebar dropdown).
+	 * Disabled backends are not selectable in the chat view.
+	 */
+	enabled?: boolean;
 }
 
 /** Union type for all backend configurations */

@@ -1,25 +1,203 @@
 import { App } from 'obsidian';
 import { AgentBackendConfig } from '../core/types';
 
+export interface AcpRegistryAgent {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  repository?: string;
+  website?: string;
+  authors?: Array<{ name: string } | string>;
+  license?: string;
+  icon?: string;
+  distribution: {
+    binary?: Record<string, { 
+      archive: string; 
+      cmd: string | string[];
+      args?: string[];
+    }>;
+    npx?: { 
+      package: string; 
+      args?: string[]; 
+      env?: Record<string, string>;
+    };
+    uvx?: { 
+      package: string; 
+      args?: string[];
+    };
+  };
+}
+
 export interface AcpRegistryResponse {
   version: string;
-  agents: Array<{
-    id: string;
-    name: string;
-    version: string;
-    description: string;
-    repository?: string;
-    website?: string;
-    authors?: Array<{ name: string } | string>;
-    license?: string;
-    icon?: string;
-    distribution: {
-      binary?: Record<string, { archive: string; cmd: string }>;
-      npx?: { package: string; args?: string[]; env?: Record<string, string> };
-      uvx?: { package: string; args?: string[] };
-    };
-  }>;
+  agents: AcpRegistryAgent[];
   extensions?: any[];
+}
+
+/**
+ * Parsed launch configuration for an agent
+ */
+export interface AgentLaunchConfig {
+  /** Agent ID from registry */
+  agentId: string;
+  /** Display name */
+  name: string;
+  /** Description */
+  description: string;
+  /** Version from registry */
+  registryVersion: string;
+  /** Command to execute (e.g., 'kimi', 'npx', 'uvx') */
+  command: string;
+  /** Arguments for the command */
+  args: string[];
+  /** Distribution type */
+  distribution: 'binary' | 'npx' | 'uvx';
+  /** Package name (for npx/uvx) */
+  package?: string;
+  /** Environment variables required */
+  env: Record<string, string>;
+  /** Installation hint for the user */
+  installHint: string;
+  /** Repository URL */
+  repository?: string;
+  /** Website URL */
+  website?: string;
+}
+
+/**
+ * Get the current platform identifier
+ */
+export function getCurrentPlatform(): string {
+  const platform = process.platform;
+  const arch = process.arch;
+  
+  const platformMap: Record<string, string> = {
+    'darwin': 'darwin',
+    'linux': 'linux',
+    'win32': 'windows',
+  };
+  
+  const archMap: Record<string, string> = {
+    'arm64': 'aarch64',
+    'x64': 'x86_64',
+  };
+  
+  const os = platformMap[platform] || 'linux';
+  const cpu = archMap[arch] || 'x86_64';
+  
+  return `${os}-${cpu}`;
+}
+
+/**
+ * Parse registry agent into launch configuration for current platform
+ */
+export function parseAgentLaunchConfig(agent: AcpRegistryAgent): AgentLaunchConfig | null {
+  const platform = getCurrentPlatform();
+  const dist = agent.distribution;
+  
+  // Priority: binary for current platform > npx > uvx
+  
+  // 1. Check binary distribution for current platform
+  if (dist.binary?.[platform]) {
+    const platformDist = dist.binary[platform];
+    const cmdParts = Array.isArray(platformDist.cmd) 
+      ? platformDist.cmd 
+      : platformDist.cmd.split(' ');
+    
+    // Extract command from registry (e.g., "./kimi" -> "kimi")
+    // Registry uses relative paths for archive extraction, but users install globally
+    let command = cmdParts[0];
+    if (command.startsWith('./')) {
+      command = command.slice(2); // Remove "./"
+    }
+    if (command.endsWith('.exe')) {
+      command = command.slice(0, -4); // Remove ".exe" for Windows
+    }
+    
+    return {
+      agentId: agent.id,
+      name: agent.name,
+      description: agent.description,
+      registryVersion: agent.version,
+      command: command,
+      args: [...cmdParts.slice(1), ...(platformDist.args || [])],
+      distribution: 'binary',
+      env: {},
+      installHint: `Download from ${agent.repository || agent.website || 'official website'}`,
+      repository: agent.repository,
+      website: agent.website,
+    };
+  }
+  
+  // 2. Check npx distribution
+  if (dist.npx) {
+    return {
+      agentId: agent.id,
+      name: agent.name,
+      description: agent.description,
+      registryVersion: agent.version,
+      command: 'npx',
+      args: [dist.npx.package, ...(dist.npx.args || [])],
+      distribution: 'npx',
+      package: dist.npx.package,
+      env: dist.npx.env || {},
+      installHint: `npm install -g ${dist.npx.package.split('@')[0]}`,
+      repository: agent.repository,
+      website: agent.website,
+    };
+  }
+  
+  // 3. Check uvx distribution
+  if (dist.uvx) {
+    return {
+      agentId: agent.id,
+      name: agent.name,
+      description: agent.description,
+      registryVersion: agent.version,
+      command: 'uvx',
+      args: [dist.uvx.package, ...(dist.uvx.args || [])],
+      distribution: 'uvx',
+      package: dist.uvx.package,
+      env: {},
+      installHint: `pip install ${dist.uvx.package.split('@')[0]}`,
+      repository: agent.repository,
+      website: agent.website,
+    };
+  }
+  
+  // No supported distribution for this platform
+  return null;
+}
+
+/**
+ * Parse all agents from registry into launch configs
+ */
+export function parseRegistryForLaunch(registry: AcpRegistryResponse): AgentLaunchConfig[] {
+  const configs: AgentLaunchConfig[] = [];
+
+  for (const agent of registry.agents) {
+    const config = parseAgentLaunchConfig(agent);
+    if (config) {
+      configs.push(config);
+    }
+  }
+
+  return configs;
+}
+
+/**
+ * Convert launch config to backend config
+ */
+export function launchConfigToBackendConfig(config: AgentLaunchConfig): AgentBackendConfig {
+  return {
+    type: 'acp-bridge',
+    id: config.agentId,
+    name: config.name,
+    command: config.command,
+    args: config.args,
+    registryAgentId: config.agentId,
+  };
 }
 
 /**
@@ -35,6 +213,39 @@ export async function fetchAcpRegistry(): Promise<AcpRegistryResponse> {
 }
 
 /**
+ * Save registry to local vault data folder (overwrites).
+ * Creates directory if needed.
+ */
+export async function saveLocalAcpRegistry(app: App, registry: AcpRegistryResponse): Promise<void> {
+  try {
+    const vault = app.vault;
+    const dir = 'data';
+    const path = `${dir}/acp-registry.json`;
+    const content = JSON.stringify(registry, null, 2);
+    
+    // Ensure data directory exists
+    const dirExists = await vault.adapter.exists(dir);
+    if (!dirExists) {
+      await vault.adapter.mkdir(dir);
+      console.log('[Registry] Created data directory');
+    }
+    
+    // Write file
+    await vault.adapter.write(path, content);
+    console.log(`[Registry] Saved to ${path}`);
+    
+    // Verify file was written
+    const fileExists = await vault.adapter.exists(path);
+    if (!fileExists) {
+      throw new Error('File write verification failed');
+    }
+  } catch (error) {
+    console.error('[Registry] Failed to save:', error);
+    throw new Error(`Failed to save registry: ${error}`);
+  }
+}
+
+/**
  * Load registry from local vault data folder.
  * Returns null if file doesn't exist or is invalid.
  */
@@ -42,89 +253,69 @@ export async function loadLocalAcpRegistry(app: App): Promise<AcpRegistryRespons
   try {
     const vault = app.vault;
     const path = 'data/acp-registry.json';
-    const file = vault.getAbstractFileByPath(path);
-    if (!file) return null;
-    const content = await vault.read(file as any);
-    return JSON.parse(content);
-  } catch {
+    
+    // Check if file exists using adapter (more reliable than getAbstractFileByPath)
+    const fileExists = await vault.adapter.exists(path);
+    if (!fileExists) {
+      console.log(`[Registry] File not found: ${path}`);
+      return null;
+    }
+    
+    // Read file content
+    const content = await vault.adapter.read(path);
+    const data = JSON.parse(content);
+    
+    // Basic validation
+    if (!data || !Array.isArray(data.agents)) {
+      console.error('[Registry] Invalid registry format');
+      return null;
+    }
+    
+    console.log(`[Registry] Loaded ${data.agents.length} agents`);
+    return data as AcpRegistryResponse;
+  } catch (error) {
+    console.error('[Registry] Failed to load:', error);
     return null;
   }
 }
 
 /**
- * Save registry to local vault data folder (overwrites).
+ * Get a specific agent from registry by ID
  */
-export async function saveLocalAcpRegistry(app: App, registry: AcpRegistryResponse): Promise<void> {
-  const vault = app.vault;
-  const path = 'data/acp-registry.json';
-  const content = JSON.stringify(registry, null, 2);
-  await vault.adapter.write(path, content);
+export function getAgentFromRegistry(registry: AcpRegistryResponse, agentId: string): AcpRegistryAgent | null {
+  return registry.agents.find(a => a.id === agentId) || null;
 }
 
 /**
- * Convert a registry agent entry into a backend config suitable for ACP Bridge.
- * Only supports binary distributions (npx/uvx would need extra plumbing).
+ * Find agent in registry by command name (heuristic matching)
  */
-export function registryAgentToBackendConfig(agent: AcpRegistryResponse['agents'][number]): AgentBackendConfig {
-  // Prefer binary distribution; fall back to npx if binary missing
-  const binaryDist = agent.distribution.binary;
-  const npxDist = agent.distribution.npx;
-  const uvxDist = agent.distribution.uvx;
+export function findAgentByCommand(registry: AcpRegistryResponse, command: string): AcpRegistryAgent | null {
+  const cmdBase = command.split(' ')[0].toLowerCase();
+  
+  // Try exact match first
+  let agent = registry.agents.find(a => a.id.toLowerCase() === cmdBase);
+  if (agent) return agent;
+  
+  // Try matching against name
+  agent = registry.agents.find(a => a.name.toLowerCase().includes(cmdBase));
+  if (agent) return agent;
+  
+  // Try matching against command in distribution
+  agent = registry.agents.find(a => {
+    const launchConfig = parseAgentLaunchConfig(a);
+    return launchConfig?.command.toLowerCase() === cmdBase;
+  });
+  
+  return agent || null;
+}
 
-  if (!binaryDist && !npxDist && !uvxDist) {
-    throw new Error(`Agent ${agent.id} has no supported distribution type`);
+/**
+ * @deprecated Use parseAgentLaunchConfig instead
+ */
+export function registryAgentToBackendConfig(agent: AcpRegistryAgent): AgentBackendConfig {
+  const launchConfig = parseAgentLaunchConfig(agent);
+  if (!launchConfig) {
+    throw new Error(`Agent ${agent.id} has no supported distribution for current platform`);
   }
-
-  let command: string;
-  let argsArray: string[] = [];
-
-  if (binaryDist) {
-    // Pick the first available platform (simple heuristic)
-    const platformKey = Object.keys(binaryDist)[0];
-    const platform = binaryDist[platformKey];
-    if (!platform) {
-      throw new Error(`Agent ${agent.id} binary distribution missing platform data`);
-    }
-
-    const { archive, cmd } = platform;
-    if (!archive || !cmd) {
-      throw new Error(`Agent ${agent.id} binary distribution missing archive or cmd`);
-    }
-
-    // Extract command and args from cmd string or array
-    if (Array.isArray(cmd)) {
-      command = cmd[0];
-      argsArray = (cmd as string[]).slice(1);
-    } else {
-      const cmdParts = (cmd as string).split(' ');
-      command = cmdParts[0];
-      argsArray = cmdParts.slice(1);
-    }
-  } else if (npxDist) {
-    command = 'npx';
-    argsArray = [npxDist.package, ...(npxDist.args || [])];
-  } else if (uvxDist) {
-    command = 'uvx';
-    argsArray = [uvxDist.package, ...(uvxDist.args || [])];
-  } else {
-    throw new Error(`Agent ${agent.id} has no supported distribution type`);
-  }
-
-  // Derive a unique ID from registry agent id + version to avoid collisions
-  const id = `acp-${agent.id}@${agent.version}`;
-
-  return {
-    type: 'acp-bridge',
-    id,
-    name: `${agent.name} (v${agent.version})`,
-    bridgeCommand: command,
-    bridgeArgs: argsArray.join(' '),
-    // Note: archive URL would need to be downloaded and extracted; this config assumes
-    // the user has already installed the agent locally and the cmd is in PATH.
-    // For a fully automated experience we would need a plugin-side installer.
-    workspaceRoot: '',
-    env: '',
-    timeoutMs: 30000,
-    autoConfirmTools: false,
-  };
+  return launchConfigToBackendConfig(launchConfig);
 }

@@ -14,13 +14,12 @@ import {
 	findBackendConfig,
 	createMockBackendConfig,
 	createKimiBackendConfig,
-	mergeAcpRegistryIntoSettings,
 } from './settings/settings';
+import { fetchAcpRegistry, saveLocalAcpRegistry } from './settings/registry-utils';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { MockAdapter } from './adapters/mock-adapter';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
-import { parseEnvString, parseBridgeArgs } from './settings/settings';
 import { SessionManager } from './services/session-manager';
 
 export default class AgentLinkPlugin extends Plugin {
@@ -40,12 +39,9 @@ async onload(): Promise<void> {
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
 		
-		// Merge ACP registry into settings (if sync enabled)
+		// Sync ACP registry data (just download for local reference, don't auto-add agents)
 		if (this.settings.enableAcpRegistrySync) {
-			const { backends, lastSync } = await mergeAcpRegistryIntoSettings(this.app, this.settings);
-			this.settings.backends = backends;
-			this.settings.lastAcpRegistrySync = lastSync;
-			await this.saveSettings(); // persist registry update
+			await this.syncRegistryData();
 		}
 		
 		this.buildAdapter();
@@ -128,6 +124,24 @@ async onload(): Promise<void> {
 			this.settings.activeBackendId = 'mock-default';
 		}
 
+		// Migration: migrate old ACP bridge configs to new format
+		this.settings.backends = this.settings.backends.map(backend => {
+			if (backend.type === 'acp-bridge' && 'bridgeCommand' in backend) {
+				// Migrate from old format to new format
+				const oldConfig = backend as any;
+				return {
+					type: 'acp-bridge' as const,
+					id: oldConfig.id,
+					name: oldConfig.name,
+					command: oldConfig.bridgeCommand || '',
+					args: oldConfig.bridgeArgs ? oldConfig.bridgeArgs.split(/\s+/).filter(Boolean) : [],
+					version: undefined,
+					registryAgentId: undefined,
+				};
+			}
+			return backend;
+		});
+
 		// Migration: add preset backends if missing
 		this.ensurePresetBackends();
 
@@ -146,7 +160,7 @@ async onload(): Promise<void> {
 	 */
 	private ensurePresetBackends(): void {
 		const presetFactories = [
-			{ id: 'kimi-code', factory: createKimiBackendConfig },
+			{ id: 'kimi', factory: createKimiBackendConfig },
 		];
 
 		for (const preset of presetFactories) {
@@ -155,6 +169,34 @@ async onload(): Promise<void> {
 				logger.info(`Adding preset backend: ${preset.id}`);
 				this.settings.backends.push(preset.factory());
 			}
+		}
+	}
+
+	/**
+	 * Sync ACP registry data from CDN to local storage.
+	 * Only downloads the registry for reference, does NOT auto-add agents to settings.
+	 */
+	private async syncRegistryData(): Promise<void> {
+		const now = Date.now();
+		const lastSync = this.settings.lastAcpRegistrySync
+			? new Date(this.settings.lastAcpRegistrySync).getTime()
+			: 0;
+		const intervalMs = this.settings.acpRegistrySyncIntervalHours * 3600 * 1000;
+		const shouldSync = intervalMs === 0 || now - lastSync > intervalMs;
+
+		if (!shouldSync) {
+			return;
+		}
+
+		try {
+			logger.info('[AgentLink] Syncing ACP registry from CDN...');
+			const registry = await fetchAcpRegistry();
+			await saveLocalAcpRegistry(this.app, registry);
+			this.settings.lastAcpRegistrySync = new Date(now).toISOString();
+			await this.saveData(this.settings);
+			logger.info(`[AgentLink] Registry synced: ${registry.agents.length} agents available`);
+		} catch (err) {
+			console.warn('[AgentLink] Failed to fetch ACP registry from CDN:', err);
 		}
 	}
 
@@ -231,13 +273,7 @@ async onload(): Promise<void> {
 
 		case 'acp-bridge': {
 			const cfg: AcpBridgeAdapterConfig = {
-				bridgeCommand: backendConfig.bridgeCommand,
-				bridgeArgs: parseBridgeArgs(backendConfig.bridgeArgs),
-				acpServerURL: backendConfig.acpServerURL,
-				workspaceRoot: backendConfig.workspaceRoot,
-				env: parseEnvString(backendConfig.env),
-				timeoutMs: backendConfig.timeoutMs,
-				autoConfirmTools: backendConfig.autoConfirmTools,
+				...backendConfig,
 				app: this.app,
 			};
 			this.adapter = new AcpBridgeAdapter(cfg);

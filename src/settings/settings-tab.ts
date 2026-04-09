@@ -1,8 +1,10 @@
-import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice, ToggleComponent } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
 import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createMockBackendConfig, mergeAcpRegistryIntoSettings } from './settings';
 import { fetchAcpRegistry } from './registry-utils';
+import { AcpAgentEditorModal } from './acp-agent-editor';
+import { LocalAgentScanModal } from './local-agent-scanner';
 
 export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
@@ -39,56 +41,20 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 	private renderBackendManagement(containerEl: HTMLElement): void {
 		containerEl.createEl('h3', { text: 'Agent Backends' });
 
-		// Preset info box
-		const hasPresets = this.plugin.settings.backends.some(b => 
-			b.id === 'kimi-code'
-		);
-		
-		if (hasPresets) {
-			const presetInfo = containerEl.createDiv({ cls: 'agentlink-preset-info' });
-			presetInfo.style.backgroundColor = 'var(--background-secondary)';
-			presetInfo.style.padding = '1em';
-			presetInfo.style.borderRadius = '6px';
-			presetInfo.style.marginBottom = '1em';
-			presetInfo.style.fontSize = '0.9em';
-			
-			presetInfo.createEl('div', { 
-				text: '🔧 内置预设配置',
-				cls: 'setting-item-name'
-			}).style.marginBottom = '0.5em';
-			
-			const presetList = presetInfo.createEl('ul');
-			presetList.style.margin = '0';
-			presetList.style.paddingLeft = '1.2em';
-			
-			if (this.plugin.settings.backends.some(b => b.id === 'kimi-code')) {
-				const kimiItem = presetList.createEl('li');
-				kimiItem.innerHTML = '<strong>🌙 Kimi Code (ACP)</strong> - 需要安装 kimi-cli: <code>pip install kimi-cli</code>，然后运行 <code>kimi login</code> 登录';
-			}
-		}
-
-		// Active backend selector
-		new Setting(containerEl)
-			.setName('Active Backend')
-			.setDesc('Select which backend to use for chatting.')
-			.addDropdown((dd) => {
-				this.plugin.settings.backends.forEach(backend => {
-					dd.addOption(backend.id, `${backend.name} (${getBackendTypeLabel(backend.type)})`);
-				});
-				dd.setValue(this.plugin.settings.activeBackendId);
-				dd.onChange(async (value) => {
-					this.plugin.settings.activeBackendId = value;
-					await this.plugin.saveSettings();
-					this.display();
-				});
-			});
-
 		// Backend list
 		const backendList = containerEl.createDiv({ cls: 'agentlink-backend-list' });
 		backendList.style.marginTop = '1em';
 		backendList.style.marginBottom = '1em';
 
-		this.plugin.settings.backends.forEach(backend => {
+		// Get enabled backends first, then disabled
+		const sortedBackends = [...this.plugin.settings.backends].sort((a, b) => {
+			const aEnabled = a.enabled !== false ? 1 : 0;
+			const bEnabled = b.enabled !== false ? 1 : 0;
+			if (aEnabled !== bEnabled) return bEnabled - aEnabled;
+			return a.name.localeCompare(b.name);
+		});
+
+		sortedBackends.forEach(backend => {
 			this.renderBackendItem(backendList, backend);
 		});
 
@@ -97,6 +63,20 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		addBtnContainer.style.display = 'flex';
 		addBtnContainer.style.gap = '0.5em';
 		addBtnContainer.style.marginTop = '1em';
+
+		// Scan Local Agents button
+		new ButtonComponent(addBtnContainer)
+			.setButtonText('🔍 Scan Local')
+			.setTooltip('Scan for locally installed ACP agents')
+			.onClick(() => {
+				new LocalAgentScanModal(this.app, this.plugin.settings.backends, async (agent) => {
+					this.plugin.settings.backends.push(agent);
+					this.plugin.settings.activeBackendId = agent.id;
+					await this.plugin.saveSettings();
+					this.display();
+					new Notice(`Added ${agent.name}`);
+				}).open();
+			});
 
 		// Add ACP Bridge button
 		new ButtonComponent(addBtnContainer)
@@ -155,34 +135,117 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		const item = container.createDiv({ cls: 'agentlink-backend-item' });
 		item.style.display = 'flex';
 		item.style.alignItems = 'center';
-		item.style.padding = '0.5em';
+		item.style.padding = '0.75em';
 		item.style.border = '1px solid var(--background-modifier-border)';
 		item.style.borderRadius = '4px';
 		item.style.marginBottom = '0.5em';
-		item.style.backgroundColor = backend.id === this.plugin.settings.activeBackendId
-			? 'var(--background-modifier-success-hover)'
-			: 'transparent';
+		
+		// Determine background color based on state
+		const isActive = backend.id === this.plugin.settings.activeBackendId;
+		const isEnabled = backend.enabled !== false;
+		
+		if (isActive) {
+			// Current active backend - green background
+			item.style.backgroundColor = 'var(--background-modifier-success-hover)';
+		} else if (!isEnabled) {
+			// Disabled backend - muted background
+			item.style.backgroundColor = 'var(--background-secondary)';
+			item.style.opacity = '0.6';
+		} else {
+			// Enabled but not active - transparent
+			item.style.backgroundColor = 'transparent';
+		}
+
+		// Enabled checkbox
+		const checkboxContainer = item.createDiv();
+		checkboxContainer.style.marginRight = '0.75em';
+		const checkbox = checkboxContainer.createEl('input');
+		checkbox.type = 'checkbox';
+		checkbox.checked = isEnabled;
+		checkbox.style.cursor = 'pointer';
+		checkbox.addEventListener('change', async () => {
+			backend.enabled = checkbox.checked;
+			await this.plugin.saveSettings();
+			this.display();
+		});
 
 		// Info
 		const info = item.createDiv();
 		info.style.flex = '1';
-		info.createEl('strong', { text: backend.name });
-		info.createEl('span', {
-			text: ` (${getBackendTypeLabel(backend.type)})`,
+		info.style.minWidth = '0';
+		
+		const nameRow = info.createDiv();
+		nameRow.style.display = 'flex';
+		nameRow.style.alignItems = 'center';
+		nameRow.style.gap = '0.5em';
+		
+		nameRow.createEl('strong', { 
+			text: backend.name,
+			cls: isEnabled ? '' : 'setting-item-description'
+		});
+		
+		// Active indicator
+		if (isActive) {
+			const activeBadge = nameRow.createEl('span', {
+				text: '(Active)',
+				cls: 'setting-item-description'
+			});
+			activeBadge.style.color = 'var(--text-success)';
+			activeBadge.style.fontWeight = 'bold';
+		}
+		
+		if (!isEnabled) {
+			nameRow.createEl('span', {
+				text: '(Disabled)',
+				cls: 'setting-item-description'
+			});
+		}
+		
+		const typeText = info.createEl('div', {
+			text: `${getBackendTypeLabel(backend.type)}${backend.type === 'acp-bridge' && (backend as AcpBridgeBackendConfig).version ? ` • v${(backend as AcpBridgeBackendConfig).version}` : ''}`,
 			cls: 'setting-item-description'
 		});
+		typeText.style.fontSize = '0.85em';
+		typeText.style.marginTop = '0.2em';
 
 		// Actions
 		const actions = item.createDiv();
 		actions.style.display = 'flex';
 		actions.style.gap = '0.5em';
+		actions.style.flexShrink = '0';
 
-		// Edit button
+		// Use button (only show if enabled and not active)
+		if (isEnabled && !isActive) {
+			new ButtonComponent(actions)
+				.setButtonText('Use')
+				.setCta()
+				.onClick(async () => {
+					this.plugin.settings.activeBackendId = backend.id;
+					await this.plugin.saveSettings();
+					this.display();
+					new Notice(`Switched to ${backend.name}`);
+				});
+		}
+
+		// Edit button - open unified editor modal
 		new ButtonComponent(actions)
 			.setButtonText('Edit')
 			.onClick(() => {
-				this.editingBackendId = backend.id;
-				this.display();
+				if (backend.type === 'acp-bridge') {
+					new AcpAgentEditorModal(this.app, backend as AcpBridgeBackendConfig, false, async (updatedConfig) => {
+						// Update the backend in settings
+						const index = this.plugin.settings.backends.findIndex(b => b.id === updatedConfig.id);
+						if (index !== -1) {
+							this.plugin.settings.backends[index] = updatedConfig;
+							await this.plugin.saveSettings();
+							this.display();
+						}
+					}).open();
+				} else {
+					// For mock backends, use inline editor
+					this.editingBackendId = backend.id;
+					this.display();
+				}
 			});
 
 		// Delete button (don't allow deleting last backend or active backend)
@@ -248,92 +311,48 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		container.createEl('h4', { text: 'ACP Bridge Configuration' });
 
 		new Setting(container)
-			.setName('Bridge Command')
-			.setDesc('Command to start the ACP Bridge (leave empty if already running).')
+			.setName('Command')
+			.setDesc('Command to start the agent (or full path if not in PATH).')
 			.addText(text => {
-				text.setPlaceholder('acp-bridge')
-					.setValue(config.bridgeCommand)
+				text.setPlaceholder('kimi')
+					.setValue(config.command)
 					.onChange(async (value) => {
-						config.bridgeCommand = value;
+						config.command = value;
 						await this.plugin.saveSettings();
 					});
 			});
 
 		new Setting(container)
-			.setName('Bridge Arguments')
-			.setDesc('Space-separated arguments for the bridge command.')
+			.setName('Arguments')
+			.setDesc('Command arguments (space-separated).')
 			.addText(text => {
-				text.setPlaceholder('--port 8080')
-					.setValue(config.bridgeArgs)
+				text.setPlaceholder('acp')
+					.setValue(config.args.join(' '))
 					.onChange(async (value) => {
-						config.bridgeArgs = value;
+						config.args = value.trim().split(/\s+/).filter(Boolean);
 						await this.plugin.saveSettings();
 					});
 			});
 
-		new Setting(container)
-			.setName('ACP Server URL (Optional)')
-			.setDesc('Only for HTTP/WebSocket-based ACP bridges. Most implementations (like Kimi CLI) use stdio and don\'t need this.')
-			.addText(text => {
-				text.setPlaceholder('http://localhost:8080 (optional)')
-					.setValue(config.acpServerURL || '')
-					.onChange(async (value) => {
-						config.acpServerURL = value || undefined;
-						await this.plugin.saveSettings();
-					});
-			});
+		if (config.version) {
+			new Setting(container)
+				.setName('Detected Version')
+				.setDesc('Auto-detected from installed agent.')
+				.addText(text => {
+					text.setValue(config.version || '')
+						.setDisabled(true);
+				});
+		}
 
-		new Setting(container)
-			.setName('Workspace Root')
-			.setDesc('Agent workspace directory (leave empty for vault root).')
-			.addText(text => {
-				text.setPlaceholder('/path/to/workspace')
-					.setValue(config.workspaceRoot)
-					.onChange(async (value) => {
-						config.workspaceRoot = value;
-						await this.plugin.saveSettings();
-					});
-			});
-
-		new Setting(container)
-			.setName('Environment Variables')
-			.setDesc('One KEY=VALUE per line. Lines starting with # are ignored.')
-			.addTextArea(text => {
-				text.setPlaceholder('ANTHROPIC_API_KEY=sk-…')
-					.setValue(config.env)
-					.onChange(async (value) => {
-						config.env = value;
-						await this.plugin.saveSettings();
-					});
-				text.inputEl.rows = 4;
-				text.inputEl.style.width = '100%';
-				text.inputEl.style.fontFamily = 'monospace';
-			});
-
-		new Setting(container)
-			.setName('Request Timeout (ms)')
-			.setDesc('Maximum time to wait for a response.')
-			.addText(text => {
-				text.setValue(String(config.timeoutMs))
-					.onChange(async (value) => {
-						const n = parseInt(value, 10);
-						if (!isNaN(n) && n > 0) {
-							config.timeoutMs = n;
-							await this.plugin.saveSettings();
-						}
-					});
-			});
-
-		new Setting(container)
-			.setName('Auto-confirm Tools')
-			.setDesc('⚠️ DANGER: Automatically confirm all tool calls without review!')
-			.addToggle(toggle => {
-				toggle.setValue(config.autoConfirmTools)
-					.onChange(async (value) => {
-						config.autoConfirmTools = value;
-						await this.plugin.saveSettings();
-					});
-			});
+		if (config.registryAgentId) {
+			new Setting(container)
+				.setName('Registry ID')
+				.setDesc('ACP Registry agent identifier.')
+				.addText(text => {
+					text.setValue(config.registryAgentId || '')
+						.setDisabled(true);
+				});
+		}
 	}
 
 	// ── ACP Registry Settings ────────────────────────────────────────────

@@ -20,6 +20,7 @@ import {
 	ToolCall,
 	ToolResult,
 	ConfigOption,
+	AcpBridgeBackendConfig,
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
@@ -27,30 +28,14 @@ import { ProcessManager } from '../services/process-manager';
 import { ToolExecutor } from '../services/tool-executor';
 
 // ============================================================================
-// Configuration
+// Adapter Configuration (using shared types)
 // ============================================================================
 
-export interface AcpBridgeAdapterConfig {
-	/** Bridge command to start (e.g., 'kimi', 'claude') */
-	bridgeCommand: string;
-	/** Arguments for bridge command */
-	bridgeArgs: string[];
-	/** 
-	 * Optional: ACP Server URL for HTTP/WebSocket-based bridges.
-	 * Most ACP implementations use stdio and don't need this.
-	 */
-	acpServerURL?: string;
-	/** Workspace root directory */
-	workspaceRoot: string;
-	/** Environment variables */
-	env: Record<string, string>;
-	/** Request timeout in ms */
-	timeoutMs: number;
-	/** Auto-confirm tool calls (DANGEROUS) */
-	autoConfirmTools: boolean;
+// Re-export the type from core/types for convenience
+export type AcpBridgeAdapterConfig = AcpBridgeBackendConfig & {
 	/** Obsidian app reference */
 	app?: App;
-}
+};
 
 // ============================================================================
 // Callbacks for UI Integration
@@ -69,30 +54,6 @@ export interface AcpAdapterCallbacks {
 	
 	/** Called when tool call status updates */
 	onToolCallUpdate?: (toolCallId: string, status: string, result?: ToolResult) => void;
-}
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
-export interface AcpBridgeAdapterConfig {
-	/** Bridge command to start (e.g., 'kimi', 'claude') */
-	bridgeCommand: string;
-	/** Arguments for bridge command */
-	bridgeArgs: string[];
-	/** 
-	 * Optional: ACP Server URL for HTTP/WebSocket-based bridges.
-	 * Most ACP implementations use stdio and don't need this.
-	 */
-	acpServerURL?: string;
-	/** Workspace root directory */
-	workspaceRoot: string;
-	/** Environment variables */
-	env: Record<string, string>;
-	/** Request timeout in ms */
-	timeoutMs: number;
-	/** Auto-confirm tool calls (DANGEROUS) */
-	autoConfirmTools: boolean;
 }
 
 // ============================================================================
@@ -329,9 +290,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.client = new AgentLinkAcpClient(this, config.app);
 		
 		console.log('[ACP Adapter] Created with config:');
-		console.log('  Command:', config.bridgeCommand);
-		console.log('  Args:', config.bridgeArgs);
-		console.log('  Workspace:', config.workspaceRoot);
+		console.log('  ID:', config.id);
+		console.log('  Command:', config.command);
+		console.log('  Args:', config.args);
 	}
 
 	updateConfig(config: Partial<AcpBridgeAdapterConfig>): void {
@@ -350,7 +311,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.state = 'connecting';
 		console.log('[ACP Adapter] ========================================');
 		console.log('[ACP Adapter] Connecting to ACP Agent...');
-		console.log('[ACP Adapter] Command:', this.config.bridgeCommand, this.config.bridgeArgs);
+		console.log('[ACP Adapter] Command:', this.config.command, this.config.args);
 
 		try {
 			// Step 1: 启动 Bridge 进程
@@ -421,7 +382,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				contentBlocks.push({
 					type: 'resource',
 					resource: {
-						uri: `file://${this.config.workspaceRoot}/current.md`,
+						uri: `file://${process.cwd()}/current.md`,
 						text: input.context.fileContent,
 					},
 				});
@@ -641,21 +602,18 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// ── Private Methods ──────────────────────────────────────────────────────
 
 	private async startBridgeProcess(): Promise<void> {
-		const { bridgeCommand, bridgeArgs, workspaceRoot, env } = this.config;
+		const { command, args } = this.config;
 
-		if (!bridgeCommand) {
-			throw new Error('Bridge command is required');
+		if (!command) {
+			throw new Error('Command is required');
 		}
 
 		console.log('[ACP Adapter] Starting bridge process...');
-		console.log('[ACP Adapter] Command:', bridgeCommand, bridgeArgs);
-		console.log('[ACP Adapter] CWD:', workspaceRoot || process.cwd());
+		console.log('[ACP Adapter] Command:', command, args);
 
 		return new Promise((resolve, reject) => {
 			try {
-				this.bridgeProcess = spawn(bridgeCommand, bridgeArgs, {
-					cwd: workspaceRoot || undefined,
-					env: { ...process.env, ...env },
+				this.bridgeProcess = spawn(command, args || [], {
 					stdio: ['pipe', 'pipe', 'pipe'],
 				});
 
@@ -782,7 +740,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		console.log('[ACP Adapter] Creating session...');
 
-		const cwd = this.config.workspaceRoot || process.cwd();
+		const cwd = process.cwd();
 		console.log('[ACP Adapter] Working directory:', cwd);
 
 		try {
