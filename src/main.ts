@@ -143,7 +143,8 @@ async onload(): Promise<void> {
 		});
 
 		// Migration: add preset backends if missing
-		this.ensurePresetBackends();
+		// Commented out: don't auto-add presets on startup, let users manually add them
+		// this.ensurePresetBackends();
 
 		// Ensure active backend exists
 		const activeExists = this.settings.backends.some(

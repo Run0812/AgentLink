@@ -89,8 +89,7 @@ export function createAcpBridgeBackendConfig(
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
   activeBackendId: 'mock-default',
   backends: [
-			createMockBackendConfig(),
-			createKimiBackendConfig(),
+    createMockBackendConfig(),
   ],
   // ── Registry settings ────────────────────────────────────────
   enableAcpRegistrySync: true,
