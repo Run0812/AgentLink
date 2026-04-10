@@ -42,7 +42,8 @@
 详细任务文档: [phase6-tasks.md](./phase6-tasks.md)
 
 #### UI 修复
-- [ ] **LED 连接状态指示修复** - 首次打开和切换 agent 时正确显示连接状态
+- [x] **LED 连接状态指示修复** - 首次打开和切换 agent 时正确显示连接状态
+- [x] **新对话预连接与命令预加载** - 新建对话或打开面板时主动准备 ACP session，避免黄灯长期闪烁并提前加载 `availableCommands`
 - [ ] **输入框快捷键优化** - Enter 发送，Shift/Ctrl+Enter 换行
 - [ ] **@ 文件后附件显示** - 选择文件后自动添加到输入状态栏
 - [ ] **@current note 整合** - 将 Current note 按钮整合到 @ 菜单中
@@ -150,6 +151,8 @@
 | / 命令功能完善 | 待实现 | /clear、/help 等命令可执行 |
 | / 命令测试脚本 | 待实现 | 创建单元测试 |
 | **ACP Slash Commands 动态支持** | 已完成 | `available_commands_update`、`input.hint`、Agent 命令插入与执行语义 |
+| **ACP client 能力补齐** | 待实现 | 补齐 `fs` 绝对路径适配、真实 permission 选择、真实 terminal 或移除假声明、认证流程 |
+| **新对话预热建连** | 已完成 | 打开面板/新建对话时主动建立 ACP session，并同步刷新 LED、commands、config |
 | **移除 MockAdapter** | 待实现 | 简化代码库，只保留 ACP Bridge |
 | 引用标签渲染 | 待实现 | @ 和 / 以引用块样式显示 |
 

@@ -264,5 +264,89 @@ describe('AcpBridgeAdapter', () => {
 			adapter.handleCurrentModeUpdate('code');
 			expect(listener).toHaveBeenCalledTimes(1);
 		});
+
+		it('waits for an in-flight prepareSession before sending the first prompt', async () => {
+			const prompt = vi.fn().mockResolvedValue({ stopReason: 'end_turn' });
+			const internal = adapter as unknown as {
+				connection: { prompt: typeof prompt } | null;
+				sessionId: string | null;
+			};
+
+			vi.spyOn(adapter as never, 'startBridgeProcess').mockImplementation(
+				() => new Promise((resolve) => setTimeout(resolve, 10)),
+			);
+			vi.spyOn(adapter as never, 'createConnection').mockImplementation(async () => {
+				internal.connection = { prompt } as never;
+			});
+			vi.spyOn(adapter as never, 'initializeProtocol').mockResolvedValue(undefined);
+			vi.spyOn(adapter as never, 'createSession').mockImplementation(async () => {
+				internal.sessionId = 'session-1';
+			});
+
+			const handlers = {
+				onChunk: vi.fn(),
+				onComplete: vi.fn(),
+				onError: vi.fn(),
+			};
+
+			const warmup = adapter.prepareSession();
+			await adapter.sendMessage({ prompt: 'hello' }, handlers);
+			await warmup;
+
+			expect(prompt).toHaveBeenCalledWith({
+				sessionId: 'session-1',
+				prompt: [{ type: 'text', text: 'hello' }],
+			});
+			expect(handlers.onComplete).toHaveBeenCalledWith('(No response)');
+			expect(handlers.onError).not.toHaveBeenCalled();
+		});
+
+		it('resets ACP session state when starting a fresh chat', async () => {
+			const newSession = vi.fn().mockResolvedValue({
+				sessionId: 'session-2',
+				modes: {
+					currentModeId: 'ask',
+					availableModes: [{ id: 'ask', name: 'Ask', description: 'Safe mode' }],
+				},
+			});
+
+			const internal = adapter as unknown as {
+				connection: { newSession: typeof newSession } | null;
+				sessionId: string | null;
+				state: 'connected';
+				configOptions: unknown[];
+				sessionModes: Array<{ id: string; name: string; description?: string }>;
+				availableCommands: Array<{ name: string; description: string }>;
+				plan: Array<{ content: string; priority: string; status: string }>;
+				currentMode: string | null;
+			};
+
+			internal.connection = { newSession } as never;
+			internal.sessionId = 'session-1';
+			internal.state = 'connected';
+			internal.configOptions = [{ id: 'mode' }];
+			internal.sessionModes = [{ id: 'code', name: 'Code' }];
+			internal.availableCommands = [{ name: 'old', description: 'Old command' }];
+			internal.plan = [{ content: 'Old plan', priority: 'high', status: 'in_progress' }];
+			internal.currentMode = 'code';
+
+			await adapter.prepareSession({ reset: true });
+
+			expect(newSession).toHaveBeenCalledTimes(1);
+			expect(adapter.getAvailableCommands()).toEqual([]);
+			expect(adapter.getPlan()).toEqual([]);
+			expect(adapter.getCurrentMode()).toBe('ask');
+			expect(adapter.getConfigOptions()).toEqual([
+				{
+					id: 'mode',
+					name: 'Mode',
+					description: 'Agent session mode',
+					category: 'mode',
+					type: 'select',
+					currentValue: 'ask',
+					options: [{ value: 'ask', name: 'Ask', description: 'Safe mode' }],
+				},
+			]);
+		});
 	});
 });

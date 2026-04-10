@@ -23,6 +23,30 @@
 
 ## 已修复
 
+### 2026-04-10
+
+#### 1. 新建对话未预连接，LED 长时间黄灯闪烁
+
+**问题描述**:
+新建对话或首次打开聊天面板后，ACP 连接没有立即建立，状态灯持续黄灯闪烁，Agent slash commands 也不会提前加载；往往需要先发送第一句话，ACP session 才真正创建。
+
+**原因**:
+- `ChatView.onOpen()` 只把 LED 设成 `connecting`，但没有真正触发 `adapter.connect()`
+- `AcpBridgeAdapter.connect()` 没有复用进行中的连接 Promise，预热与首条消息发送容易竞态
+- 新建本地对话时没有同步准备新的 ACP session，导致 commands/config 要等首条消息后才刷新
+
+**修复内容**:
+1. 为 `AcpBridgeAdapter` 增加 `prepareSession()`，支持首次预热和“新对话重建 session”
+2. `connect()` 复用进行中的连接 Promise，`sendMessage()` 在 `connecting` 状态下会等待会话准备完成
+3. `ChatView` 在打开面板、加载会话、新建对话时主动准备 session，并随 session 状态刷新 LED、plan、config、slash commands
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/ui/chat-view.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+
+---
+
 ### 2026-04-08
 
 #### 1. ACP session/update 消息格式解析错误
@@ -202,4 +226,4 @@ localStorage.setItem('debug', 'AgentLink:*');
 
 ---
 
-*最后更新: 2026-04-09*
+*最后更新: 2026-04-10*

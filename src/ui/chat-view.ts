@@ -132,6 +132,7 @@ export class ChatView extends ItemView {
 		this.adapter = adapter;
 		const acpAdapter = adapter as AcpBridgeAdapter & { subscribeSessionState?: (listener: () => void) => () => void };
 		this.detachSessionStateListener = acpAdapter.subscribeSessionState?.(() => {
+			this.refreshStatus();
 			void this.refreshSessionFeatures();
 			this.refreshAutocompleteFromInput();
 		});
@@ -156,9 +157,7 @@ export class ChatView extends ItemView {
 		container.empty();
 		container.addClass('agentlink-container');
 		this.buildUI(container);
-		
-		// Initialize LED state after UI is built
-		this.updateLedState('connecting');
+		this.refreshStatus();
 	}
 
 	/**
@@ -1076,9 +1075,8 @@ export class ChatView extends ItemView {
 		if (busy) {
 			this.updateLedState('busy');
 		} else {
-			// Reset to connection state based on adapter status
 			const adapterState = this.adapter?.getStatus().state ?? 'disconnected';
-			this.updateLedState(adapterState === 'connected' ? 'connected' : 'disconnected');
+			this.updateLedState(adapterState === 'busy' ? 'connected' : adapterState);
 		}
 	}
 
@@ -1409,6 +1407,7 @@ export class ChatView extends ItemView {
 			const currentSession = this.sessionManager.getSession(this.currentSessionId);
 			if (currentSession && currentSession.messages.length === 0) {
 				// Current session is already empty, just focus it
+				void this.prepareAdapterSession({ reset: true });
 				this.inputEl?.focus();
 				return;
 			}
@@ -1421,6 +1420,7 @@ export class ChatView extends ItemView {
 		this.renderWelcome();
 		this.updateSessionTitle(session.title);
 		this.refreshStatus();
+		void this.prepareAdapterSession({ reset: true });
 		this.inputEl?.focus();
 	}
 
@@ -1442,6 +1442,27 @@ export class ChatView extends ItemView {
 
 		this.updateSessionTitle(session.title);
 		this.refreshStatus();
+		void this.prepareAdapterSession();
+	}
+
+	private async prepareAdapterSession(options?: { reset?: boolean }): Promise<void> {
+		if (!this.adapter) {
+			return;
+		}
+
+		try {
+			if (this.adapter.prepareSession) {
+				await this.adapter.prepareSession(options);
+				return;
+			}
+
+			await this.adapter.connect();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logger.error('ChatView: failed to prepare adapter session', error);
+			console.error('[ChatView] Failed to prepare adapter session:', message);
+			this.refreshStatus();
+		}
 	}
 
 	/** Update the session title in UI */

@@ -9,6 +9,33 @@
 
 ---
 
+## 2026-04-10 - 修复新对话 ACP 预连接与会话预热链路
+
+**实现范围**:
+- 新建对话预热
+- ACP session 重建
+- LED 状态同步
+
+**完成内容**:
+- `AcpBridgeAdapter` 新增 `prepareSession()`，支持首次预连接和“新对话重建 ACP session”
+- `connect()` 改为复用进行中的连接 Promise，避免后台预热与首条消息发送发生竞态
+- `sendMessage()` 现在会等待 `connecting` 状态完成，不会因为预热尚未结束而提前报“session not established”
+- `ChatView` 在新建对话和加载历史会话时会主动准备 adapter session，不再等首条消息触发建连
+- ACP session 状态变化现在会同步刷新 LED、config、plan 和 slash command 自动完成
+
+**测试结果**:
+- 新增逻辑单测覆盖“预热中立即发送首条消息”和“新对话重建 ACP session 清空旧状态”
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/ui/chat-view.ts`
+- `src/core/types.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+- `.memory/01-tasks.md`
+- `.memory/03-bugs.md`
+
+---
+
 ## 2026-04-10 - 实现 ACP 会话能力并补齐回归测试
 
 **实现范围**:

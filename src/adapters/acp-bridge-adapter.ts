@@ -301,6 +301,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// SDK 连接
 	private connection: acp.ClientSideConnection | null = null;
 	private client: AgentLinkAcpClient;
+	private connectionPromise: Promise<void> | null = null;
 	
 	// Session
 	private sessionId: string | null = null;
@@ -343,47 +344,60 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// ── Connection Management ────────────────────────────────────────────────
 
 	async connect(): Promise<void> {
-		if (this.state === 'connected' || this.state === 'connecting') {
-			console.log('[ACP Adapter] Already connected/connecting');
+		if ((this.state === 'connected' || this.state === 'busy') && this.connection && this.sessionId) {
+			console.log('[ACP Adapter] Already connected');
 			return;
 		}
 
-		this.state = 'connecting';
-		console.log('[ACP Adapter] ========================================');
-		console.log('[ACP Adapter] Connecting to ACP Agent...');
-		console.log('[ACP Adapter] Command:', this.config.command, this.config.args);
+		if (this.connectionPromise) {
+			console.log('[ACP Adapter] Connection is already in progress');
+			return this.connectionPromise;
+		}
 
+		this.connectionPromise = this.establishConnection();
 		try {
-			// Step 1: 启动 Bridge 进程
-			await this.startBridgeProcess();
-			
-			// Step 2: 创建 SDK 连接
-			await this.createConnection();
-			
-			// Step 3: 初始化 ACP 协议
-			await this.initializeProtocol();
-			
-			// Step 4: 创建 Session
-			await this.createSession();
-
-			this.state = 'connected';
-			console.log('[ACP Adapter] ========================================');
-			console.log('[ACP Adapter] ✅ Connected successfully!');
-			console.log('[ACP Adapter] Session ID:', this.sessionId);
-		} catch (error) {
-			this.state = 'error';
-			await this.cleanup();
-			const message = error instanceof Error ? error.message : String(error);
-			console.error('[ACP Adapter] ❌ Connection failed:', message);
-			throw new ConnectionError(`Failed to connect to ACP Bridge: ${message}`);
+			await this.connectionPromise;
+		} finally {
+			this.connectionPromise = null;
 		}
 	}
 
 	async disconnect(): Promise<void> {
 		console.log('[ACP Adapter] Disconnecting...');
 		await this.cleanup();
-		this.state = 'disconnected';
+		this.setState('disconnected');
 		console.log('[ACP Adapter] Disconnected');
+	}
+
+	async prepareSession(options?: { reset?: boolean }): Promise<void> {
+		const reset = options?.reset ?? false;
+		console.log('[ACP Adapter] Preparing session. Reset:', reset);
+
+		if (!reset) {
+			await this.connect();
+			return;
+		}
+
+		if (this.connectionPromise) {
+			await this.connectionPromise;
+		}
+
+		if (!this.connection || !this.sessionId || this.state === 'disconnected' || this.state === 'error') {
+			await this.connect();
+			return;
+		}
+
+		if (this.state === 'busy') {
+			console.warn('[ACP Adapter] Skipping session reset while adapter is busy');
+			return;
+		}
+
+		this.connectionPromise = this.resetSession();
+		try {
+			await this.connectionPromise;
+		} finally {
+			this.connectionPromise = null;
+		}
 	}
 
 	// ── Message Sending ──────────────────────────────────────────────────────
@@ -392,8 +406,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		console.log('[ACP Adapter] ========================================');
 		console.log('[ACP Adapter] sendMessage called');
 		
-		if (this.state === 'disconnected') {
-			console.log('[ACP Adapter] Not connected, connecting first...');
+		if (this.state === 'disconnected' || this.state === 'connecting' || !this.connection || !this.sessionId) {
+			console.log('[ACP Adapter] Session not ready, connecting first...');
 			await this.connect();
 		}
 
@@ -401,7 +415,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			throw new ConnectionError('Connection or session not established');
 		}
 
-		this.state = 'busy';
+		this.setState('busy');
 		this.currentHandlers = handlers;
 		this.responseBuffer = [];
 		this.thinkingBuffer = [];
@@ -442,11 +456,11 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			const fullText = this.responseBuffer.join('');
 			console.log('[ACP Adapter] Full response length:', fullText.length);
 			
-			this.state = 'connected';
+			this.setState('connected');
 			handlers.onComplete(fullText || '(No response)');
 
 		} catch (error) {
-			this.state = 'connected';
+			this.setState('connected');
 			console.error('[ACP Adapter] Send message failed:', error);
 			
 			if (error instanceof CancellationError) {
@@ -775,7 +789,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				this.bridgeProcess.on('exit', (code) => {
 					if (code !== 0 && code !== null && this.state !== 'disconnected') {
 						console.error('[ACP Adapter] Bridge process exited with code:', code);
-						this.state = 'error';
+						this.setState('error');
 					}
 				});
 
@@ -818,7 +832,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		// 监听连接关闭
 		this.connection.signal.addEventListener('abort', () => {
 			console.log('[ACP Adapter] Connection aborted/closed');
-			this.state = 'disconnected';
+			this.setState('disconnected');
 		});
 
 		console.log('[ACP Adapter] SDK connection created');
@@ -908,6 +922,59 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		} catch (error) {
 			console.error('[ACP Adapter] Create session failed:', error);
+			throw error;
+		}
+	}
+
+	private async establishConnection(): Promise<void> {
+		this.setState('connecting');
+		console.log('[ACP Adapter] ========================================');
+		console.log('[ACP Adapter] Connecting to ACP Agent...');
+		console.log('[ACP Adapter] Command:', this.config.command, this.config.args);
+
+		try {
+			console.log('[ACP Adapter] Step 1/4: Starting bridge process');
+			await this.startBridgeProcess();
+
+			console.log('[ACP Adapter] Step 2/4: Creating SDK connection');
+			await this.createConnection();
+
+			console.log('[ACP Adapter] Step 3/4: Initializing ACP protocol');
+			await this.initializeProtocol();
+
+			console.log('[ACP Adapter] Step 4/4: Creating session');
+			await this.createSession();
+
+			this.setState('connected');
+			console.log('[ACP Adapter] ========================================');
+			console.log('[ACP Adapter] ✅ Connected successfully!');
+			console.log('[ACP Adapter] Session ID:', this.sessionId);
+		} catch (error) {
+			this.setState('error');
+			await this.cleanup();
+			const message = error instanceof Error ? error.message : String(error);
+			console.error('[ACP Adapter] ❌ Connection failed:', message);
+			throw new ConnectionError(`Failed to connect to ACP Bridge: ${message}`);
+		}
+	}
+
+	private async resetSession(): Promise<void> {
+		if (!this.connection) {
+			throw new Error('Connection not established');
+		}
+
+		console.log('[ACP Adapter] Resetting ACP session for a fresh chat');
+		this.setState('connecting');
+		this.resetSessionState();
+		this.emitSessionStateChange();
+
+		try {
+			await this.createSession();
+			this.setState('connected');
+			console.log('[ACP Adapter] Fresh ACP session ready:', this.sessionId);
+		} catch (error) {
+			this.setState('error');
+			console.error('[ACP Adapter] Reset session failed:', error);
 			throw error;
 		}
 	}
@@ -1109,6 +1176,20 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		return configOptions.map((option) => `${option.id}=${String(option.currentValue)}`).join(', ') || '(none)';
 	}
 
+	private setState(state: AgentStatusState): void {
+		this.state = state;
+		this.emitSessionStateChange();
+	}
+
+	private resetSessionState(): void {
+		this.sessionId = null;
+		this.configOptions = [];
+		this.sessionModes = [];
+		this.availableCommands = [];
+		this.plan = [];
+		this.currentMode = null;
+	}
+
 	private emitSessionStateChange(): void {
 		for (const listener of this.sessionStateListeners) {
 			listener();
@@ -1129,13 +1210,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			this.bridgeProcess = null;
 		}
 
-		this.sessionId = null;
+		this.connectionPromise = null;
 		this.serverCapabilities = [];
-		this.configOptions = [];
-		this.sessionModes = [];
-		this.availableCommands = [];
-		this.plan = [];
-		this.currentMode = null;
+		this.resetSessionState();
 		this.currentHandlers = null;
 		this.responseBuffer = [];
 		this.thinkingBuffer = [];

@@ -481,6 +481,8 @@ export interface AgentAdapter {
 	getCurrentMode?(): string | null;
 	/** Get ACP session modes advertised by the agent. */
 	getSessionModes?(): SessionModeOption[];
+	/** Prepare the backend session before the first prompt or when starting a fresh chat. */
+	prepareSession?(options?: { reset?: boolean }): Promise<void>;
 	
 	/** 
 	 * Get available skills from the agent.
