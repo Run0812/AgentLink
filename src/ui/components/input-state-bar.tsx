@@ -8,7 +8,6 @@ interface InputStateBarProps {
 	onRemoveAttachment: (id: string) => void;
 	onAttachFile: () => void;
 	onAttachSelection: () => void;
-	onAttachCurrentNote: () => void;
 	canAttachSelection: boolean;
 }
 
@@ -26,7 +25,6 @@ export const InputStateBar: FunctionComponent<InputStateBarProps> = ({
 	onRemoveAttachment,
 	onAttachFile,
 	onAttachSelection,
-	onAttachCurrentNote,
 	canAttachSelection,
 }) => {
 	const formatSize = useCallback((bytes: number): string => {
@@ -59,31 +57,9 @@ export const InputStateBar: FunctionComponent<InputStateBarProps> = ({
 				}}
 			>
 				<span style={{ flex: 1 }}>
-					Add context (#), files (@), or commands (/)
-				</span>
+				Add context (#), files (@), or commands (/)
+			</span>
 				<div style={{ display: 'flex', gap: '8px' }}>
-					<button 
-						className="agentlink-input-state-link"
-						onClick={onAttachCurrentNote}
-						style={{
-							background: 'none',
-							border: 'none',
-							color: 'var(--text-muted)',
-							cursor: 'pointer',
-							fontSize: '12px',
-							padding: '2px 6px',
-						}}
-						onMouseEnter={(e) => {
-							e.currentTarget.style.color = 'var(--text-normal)';
-							e.currentTarget.style.textDecoration = 'underline';
-						}}
-						onMouseLeave={(e) => {
-							e.currentTarget.style.color = 'var(--text-muted)';
-							e.currentTarget.style.textDecoration = 'none';
-						}}
-					>
-						Current note
-					</button>
 					{canAttachSelection && (
 						<button 
 							className="agentlink-input-state-link"

@@ -83,6 +83,7 @@ export class ChatView extends ItemView {
 	// ── Phase 5: Input State & Autocomplete ─────────────────────────────
 	private inputStateContainer!: HTMLElement;
 	private autocompleteContainer!: HTMLElement;
+	private isAutocompleteOpen = false;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -143,6 +144,32 @@ export class ChatView extends ItemView {
 		container.empty();
 		container.addClass('agentlink-container');
 		this.buildUI(container);
+		
+		// Initialize LED state after UI is built
+		this.updateLedState('connecting');
+	}
+
+	/**
+	 * Update LED indicator state
+	 * Centralized LED state management for consistent visual feedback
+	 */
+	private updateLedState(state: 'connected' | 'disconnected' | 'connecting' | 'busy' | 'error'): void {
+		if (!this.statusLed) return;
+		
+		const styles = {
+			connected: { bg: '#4ade80', animation: 'none', shadow: '0 0 4px #4ade80' },
+			disconnected: { bg: '#f87171', animation: 'none', shadow: '0 0 4px #f87171' },
+			connecting: { bg: '#fbbf24', animation: 'agentlink-led-blink 0.6s ease-in-out infinite', shadow: '0 0 4px #fbbf24' },
+			busy: { bg: '#fbbf24', animation: 'agentlink-led-blink 0.6s ease-in-out infinite', shadow: '0 0 4px #fbbf24' },
+			error: { bg: '#ef4444', animation: 'none', shadow: '0 0 4px #ef4444' },
+		};
+		
+		const style = styles[state];
+		this.statusLed.style.background = style.bg;
+		this.statusLed.style.animation = style.animation;
+		this.statusLed.style.boxShadow = style.shadow;
+		
+		console.log(`[ChatView] LED state changed to: ${state}`);
 	}
 
 	async onClose(): Promise<void> {
@@ -304,9 +331,20 @@ export class ChatView extends ItemView {
 		this.inputEl.style.resize = 'none';
 		this.inputEl.style.outline = 'none';
 		this.inputEl.addEventListener('keydown', (evt) => {
-			if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
-				evt.preventDefault();
-				this.handleSend();
+			if (evt.key === 'Enter') {
+				// When autocomplete is open, let it handle Enter key
+				if (this.isAutocompleteOpen) {
+					return;
+				}
+				
+				if (evt.shiftKey || evt.ctrlKey || evt.metaKey || evt.altKey) {
+					// With modifier: insert newline (default textarea behavior)
+					return;
+				} else {
+					// No modifier: send message
+					evt.preventDefault();
+					this.handleSend();
+				}
 			}
 		});
 
@@ -875,16 +913,13 @@ export class ChatView extends ItemView {
 		this.sendBtn.style.display = busy ? 'none' : '';
 		this.stopBtn.style.display = busy ? '' : 'none';
 		
-		// Update status LED to yellow blinking when generating
-		if (this.statusLed) {
-			if (busy) {
-				this.statusLed.style.background = '#fbbf24';
-				this.statusLed.style.animation = 'agentlink-led-blink 0.6s ease-in-out infinite';
-				this.statusLed.style.boxShadow = '0 0 4px #fbbf24';
-			} else {
-				// Reset to connection state
-				this.refreshStatus();
-			}
+		// Update status LED using centralized method
+		if (busy) {
+			this.updateLedState('busy');
+		} else {
+			// Reset to connection state based on adapter status
+			const adapterState = this.adapter?.getStatus().state ?? 'disconnected';
+			this.updateLedState(adapterState === 'connected' ? 'connected' : 'disconnected');
 		}
 	}
 
@@ -898,24 +933,9 @@ export class ChatView extends ItemView {
 			}
 		}
 
-		// Update status LED
-		if (this.statusLed) {
-			const statusState = this.adapter?.getStatus().state ?? 'disconnected';
-			
-			if (statusState === 'connected') {
-				this.statusLed.style.background = '#4ade80';
-				this.statusLed.style.animation = 'none';
-				this.statusLed.style.boxShadow = '0 0 3px #4ade80';
-			} else if (statusState === 'disconnected') {
-				this.statusLed.style.background = '#f87171';
-				this.statusLed.style.animation = 'none';
-				this.statusLed.style.boxShadow = '0 0 3px #f87171';
-			} else {
-				this.statusLed.style.background = '#6b7280';
-				this.statusLed.style.animation = 'none';
-				this.statusLed.style.boxShadow = 'none';
-			}
-		}
+		// Update status LED using centralized method
+		const statusState = this.adapter?.getStatus().state ?? 'disconnected';
+		this.updateLedState(statusState);
 	}
 
 	private scrollToBottom(): void {
@@ -1452,8 +1472,24 @@ export class ChatView extends ItemView {
 
 			item.addEventListener('click', async () => {
 				if (backend.id !== this.settings.activeBackendId) {
+					// Disconnect from current adapter if connected
+					if (this.adapter?.disconnect) {
+						this.updateLedState('connecting');
+						try {
+							await this.adapter.disconnect();
+						} catch (error) {
+							console.error('[ChatView] Error disconnecting from current adapter:', error);
+						}
+					}
+					
+					// Update settings
 					this.settings.activeBackendId = backend.id;
 					await this.onSettingsSave();
+					
+					// Update LED to connecting state
+					this.updateLedState('connecting');
+					
+					// Refresh status to reflect the change
 					this.refreshStatus();
 					new Notice(`Switched to ${backend.name}`);
 				}
@@ -1860,7 +1896,6 @@ export class ChatView extends ItemView {
 				},
 				onAttachFile: () => this.handleAttachFile(),
 				onAttachSelection: () => this.handleAttachSelection(),
-				onAttachCurrentNote: () => this.handleAttachCurrentNote(),
 				canAttachSelection: hasSelection,
 			}),
 			this.inputStateContainer
@@ -1919,6 +1954,8 @@ export class ChatView extends ItemView {
 	private showAutocomplete(trigger: AutocompleteTrigger, query: string): void {
 		if (!this.autocompleteContainer) return;
 
+		this.isAutocompleteOpen = true;
+		
 		let suggestions: Array<{ id: string; label: string; description?: string; icon?: string; data?: unknown }> = [];
 
 		if (trigger === 'slash') {
@@ -1926,10 +1963,11 @@ export class ChatView extends ItemView {
 				s.label.toLowerCase().includes(query.toLowerCase())
 			);
 		} else if (trigger === 'mention') {
+			const activeFile = this.app.workspace.getActiveFile();
 			const files = this.contextService.searchFiles(query, 10);
 			const folders = this.contextService.searchFolders(query, 5);
 			suggestions = [
-				...createFileSuggestions(files),
+				...createFileSuggestions(files, activeFile),
 				...createFolderSuggestions(folders),
 			];
 		} else if (trigger === 'topic') {
@@ -1988,16 +2026,17 @@ export class ChatView extends ItemView {
 
 	/** Hide autocomplete menu */
 	private hideAutocomplete(): void {
+		this.isAutocompleteOpen = false;
 		if (this.autocompleteContainer) {
 			render(null, this.autocompleteContainer);
 		}
 	}
 
 	/** Handle autocomplete item selection */
-	private handleAutocompleteSelect(
+	private async handleAutocompleteSelect(
 		item: { id: string; label: string; description?: string; icon?: string; data?: unknown },
 		trigger: AutocompleteTrigger
-	): void {
+	): Promise<void> {
 		const value = this.inputEl.value;
 		const cursorPos = this.inputEl.selectionStart || 0;
 		const textBeforeCursor = value.substring(0, cursorPos);
@@ -2009,10 +2048,22 @@ export class ChatView extends ItemView {
 			const lastSlash = textBeforeCursor.lastIndexOf('/');
 			newText = textBeforeCursor.substring(0, lastSlash) + item.label + ' ' + textAfterCursor;
 		} else if (trigger === 'mention') {
-			// Replace @file with the file reference
+			// Handle file/folder mention: attach as file and update input
 			const lastAt = textBeforeCursor.lastIndexOf('@');
-			const file = item.data as { path: string };
-			newText = textBeforeCursor.substring(0, lastAt) + '@' + (file?.path || item.label) + ' ' + textAfterCursor;
+			const data = item.data as { type: string; file: { path: string; name: string } } | undefined;
+			const file = data?.file;
+			
+			if (file?.path) {
+				// Create file attachment
+				const attachment = await this.contextService.createFileAttachment(file.path);
+				if (attachment) {
+					this.renderInputStateBar();
+					new Notice(`Attached: ${attachment.name}`);
+				}
+			}
+			
+			// Remove the @ trigger text from input
+			newText = textBeforeCursor.substring(0, lastAt) + textAfterCursor;
 		} else if (trigger === 'topic') {
 			// Replace #topic with the topic reference
 			const lastHash = textBeforeCursor.lastIndexOf('#');

@@ -19,7 +19,192 @@
 | Phase 3 - ACP Bridge Mode | ✅ 已完成 | 100% |
 | Phase 4 - 历史对话保存功能 | ✅ 已完成 | 100% |
 | Phase 5 - agent命令支持 | ✅ 已完成 | 100% |
-| Phase 6 - 工程加固与发布 | 🟡 进行中 | 20% |
+| Phase 6 - UI-UX 优化 | 🟡 进行中 | 60% |
+
+---
+
+## 2026-04-10 - 修复快捷键冲突：Enter 键在自动完成菜单中 ✅
+
+**问题**: 当 @ 或 / 自动完成菜单打开时，按下 Enter 键会触发输入框的发送消息，而不是选择菜单项
+
+**解决方案**: 添加 `isAutocompleteOpen` 标志位，在输入框 keydown 处理中检查此标志
+
+**修改内容**:
+
+### src/ui/chat-view.ts
+1. 添加 `isAutocompleteOpen` 私有属性
+2. 在 `showAutocomplete()` 中设置为 `true`
+3. 在 `hideAutocomplete()` 中设置为 `false`
+4. 在输入框 keydown 事件中检查 `isAutocompleteOpen`，当菜单打开时不触发发送
+
+**代码变更**:
+```typescript
+// 添加标志位
+private isAutocompleteOpen = false;
+
+// showAutocomplete 中设置
+this.isAutocompleteOpen = true;
+
+// hideAutocomplete 中清除
+this.isAutocompleteOpen = false;
+
+// keydown 中检查
+if (evt.key === 'Enter') {
+    if (this.isAutocompleteOpen) {
+        return; // Let autocomplete handle it
+    }
+    // ... rest of logic
+}
+```
+
+### 构建产物
+
+```
+build/
+├── main.js       (860.4 KB)
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 测试步骤
+
+1. 在输入框中输入 `@` 或 `/`
+2. 自动完成菜单应该弹出
+3. 按 Enter 键 → 应该选中高亮的菜单项，**而不是发送消息**
+4. 按 Esc 或点击其他地方关闭菜单
+5. 再次按 Enter 键 → 应该发送消息
+
+---
+
+## 2026-04-10 - Phase 6 发布到 dev 目录测试 ✅
+
+**操作**: 将 Phase 6 UI-UX 优化构建产物发布到 dev vault
+
+### 构建产物
+
+```
+build/
+├── main.js       (860.2 KB) - 包含 Phase 6 LED 和快捷键优化
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 发布位置
+
+复制到: `dev/.obsidian/plugins/agentlink/`
+
+**文件清单**:
+- ✅ main.js (860.2 KB) - 主程序，包含 Phase 6 功能
+- ✅ manifest.json (0.33 KB) - 插件清单
+- ✅ styles.css (11.30 KB) - 样式文件
+- ✅ data.json (2.3 KB) - 用户数据（保留）
+
+### 测试步骤
+
+1. 打开 Obsidian
+2. 打开 `dev/` 文件夹作为 vault
+3. 进入设置 → 社区插件 → 启用 AgentLink
+4. 测试新功能：
+   - **LED 状态**: 打开 chat 面板，观察 LED 是否为黄色闪烁（connecting）
+   - **快捷键**: 
+     - Enter 发送消息
+     - Shift+Enter 换行
+     - Ctrl+Enter 换行
+   - **@ 文件引用**:
+     - 输入 `@` 查看文件列表
+     - 选择文件后，观察是否自动添加到输入状态栏
+     - 观察 "Current note" 是否显示在 @ 菜单顶部
+   - **Agent 切换**: 切换 agent 时观察 LED 状态变化
+
+### 功能验证
+
+- ✅ 构建成功（无错误）
+- ✅ 测试通过（71/71）
+- ✅ 文件已复制到 dev 目录
+- ✅ 准备进行集成测试
+
+---
+
+## 2026-04-10 - Phase 6 UI-UX 优化：核心功能完成 ✅
+
+**目标**: 修复 LED 连接状态、优化输入快捷键、改进 @mention 体验
+
+**状态**: ✅ 高优先级任务已完成
+
+### 已完成功能
+
+#### 1. LED 连接状态修复 ✅
+**文件**: `src/ui/chat-view.ts`
+
+**修改内容**:
+- 新增 `updateLedState()` 方法统一管理 LED 状态
+- 支持状态：connected (绿色)、disconnected (红色)、connecting (黄色闪烁)、busy (黄色闪烁)、error (红色)
+- 修改 `onOpen()` 初始化时 LED 显示为 connecting 状态
+- 修改 `setBusy()` 使用新的 LED 状态管理
+- 修改 `refreshStatus()` 使用新的 LED 状态管理
+- 修改 `renderAgentDropdown()` 切换 agent 时先断开旧连接，LED 显示 connecting
+
+**实现细节**:
+```typescript
+private updateLedState(state: 'connected' | 'disconnected' | 'connecting' | 'busy' | 'error'): void {
+  const styles = {
+    connected: { bg: '#4ade80', animation: 'none', shadow: '0 0 4px #4ade80' },
+    disconnected: { bg: '#f87171', animation: 'none', shadow: '0 0 4px #f87171' },
+    connecting: { bg: '#fbbf24', animation: 'agentlink-led-blink 0.6s ease-in-out infinite', ... },
+    // ...
+  };
+}
+```
+
+#### 2. 输入框快捷键优化 ✅
+**文件**: `src/ui/chat-view.ts`
+
+**修改内容**:
+- Enter: 发送消息
+- Shift+Enter: 换行
+- Ctrl+Enter: 换行
+- Alt+Enter: 换行
+
+#### 3. @ 文件后附件显示 ✅
+**文件**: `src/ui/chat-view.ts`, `src/ui/components/input-autocomplete.tsx`
+
+**修改内容**:
+- 修改 `handleAutocompleteSelect()` 为 async 方法
+- 选择文件后自动创建附件并显示在输入状态栏
+- 从输入框中移除 @ 触发文本
+- 显示通知 "Attached: filename"
+- 更新 InputAutocomplete 组件支持异步 onSelect 回调
+
+#### 4. @current note 整合到 @ 菜单 ✅
+**文件**: `src/ui/components/input-autocomplete.tsx`, `src/ui/components/input-state-bar.tsx`, `src/ui/chat-view.ts`
+
+**修改内容**:
+- 修改 `createFileSuggestions()` 添加 "Current note" 选项（如果有活动文件）
+- 在 @ 菜单顶部显示 "Current note" 选项
+- 从 InputStateBar 中移除 "Current note" 按钮
+- 更新相关 props 和类型定义
+
+### 文件变更
+
+**修改文件**:
+- `src/ui/chat-view.ts` - LED 状态、快捷键、@mention 处理
+- `src/ui/components/input-autocomplete.tsx` - 异步回调支持、current note 选项
+- `src/ui/components/input-state-bar.tsx` - 移除 current note 按钮
+
+### 待完成功能
+
+#### 5. @ 和 / 整体渲染（引用块样式）
+- 状态: ⏳ 待开始
+- 说明: 需要将 @ 和 / 文本以蓝色标签样式显示（较复杂，需要富文本编辑器）
+
+#### 6. / 命令功能验证与测试脚本
+- 状态: ⏳ 待开始
+- 说明: 验证 /clear、/help 等命令正常工作
+
+### 测试结果
+
+- ✅ TypeScript 类型检查通过
+- ✅ 无编译错误
 
 ---
 
@@ -455,23 +640,22 @@ build/
 
 ## 下一步计划
 
-### 近期（1-2 周）- Phase 5
+### 近期（本周）- Phase 6 剩余任务
 
-1. **`/` 斜杠命令自动提示**
-   - 实现命令列表下拉
-   - 键盘导航支持
+1. **@ 和 / 整体渲染（引用块样式）**
+   - 将 @ 和 / 文本以蓝色标签样式显示
+   - 可选：使用 contenteditable 实现富文本输入
 
-2. **`@` 文件/文件夹引用**
-   - 文件选择器实现
-   - 输入状态栏标签显示
-   - 上下文附件服务
+2. **/ 命令功能验证与测试脚本**
+   - 验证 /clear、/help 命令执行
+   - 创建单元测试
 
-### 中期（3-4 周）- Phase 6
+### 中期（下周）- Phase 6 完成
 
 3. **工程加固与发布**
-   - 编写 README 和配置指南
-   - 错误处理完善
-   - 提交到 Obsidian 社区插件市场
+   - 完善错误处理
+   - 更新 README 和文档
+   - 准备提交到 Obsidian 社区插件市场
 
 ---
 
@@ -483,4 +667,4 @@ build/
 
 ---
 
-*最后更新: 2026-04-09*
+*最后更新: 2026-04-10*

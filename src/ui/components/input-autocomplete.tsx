@@ -17,7 +17,7 @@ interface InputAutocompleteProps {
 	query: string;
 	position: { x: number; y: number };
 	suggestions: SuggestionItem[];
-	onSelect: (item: SuggestionItem) => void;
+	onSelect: (item: SuggestionItem) => void | Promise<void>;
 	onClose: () => void;
 }
 
@@ -46,7 +46,7 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 	}, [suggestions.length]);
 
 	// 键盘导航
-	const handleKeyDown = useCallback((e: KeyboardEvent) => {
+	const handleKeyDown = useCallback(async (e: KeyboardEvent) => {
 		switch (e.key) {
 			case 'ArrowDown':
 				e.preventDefault();
@@ -61,7 +61,7 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 			case 'Enter':
 				e.preventDefault();
 				if (suggestions[selectedIndex]) {
-					onSelect(suggestions[selectedIndex]);
+					await onSelect(suggestions[selectedIndex]);
 				}
 				break;
 			case 'Escape':
@@ -71,7 +71,7 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 			case 'Tab':
 				e.preventDefault();
 				if (suggestions[selectedIndex]) {
-					onSelect(suggestions[selectedIndex]);
+					await onSelect(suggestions[selectedIndex]);
 				}
 				break;
 		}
@@ -153,7 +153,7 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 					<div
 						key={item.id}
 						className={`agentlink-autocomplete-item ${index === selectedIndex ? 'is-selected' : ''}`}
-						onClick={() => onSelect(item)}
+						onClick={async () => await onSelect(item)}
 						onMouseEnter={() => setSelectedIndex(index)}
 						style={{
 							padding: '5px 10px',
@@ -275,15 +275,33 @@ export function createSlashCommandSuggestions(): SuggestionItem[] {
 
 /**
  * 创建文件建议项（紧凑版）
+ * @param files - 文件列表
+ * @param currentFile - 当前活动文件（可选，用于添加 "Current note" 选项）
  */
-export function createFileSuggestions(files: TFile[]): SuggestionItem[] {
-	return files.map(file => ({
+export function createFileSuggestions(files: TFile[], currentFile?: TFile | null): SuggestionItem[] {
+	const suggestions: SuggestionItem[] = [];
+	
+	// Add "Current note" option if there's an active file
+	if (currentFile) {
+		suggestions.push({
+			id: 'current_note',
+			label: 'Current note',
+			description: currentFile.path,
+			icon: '📄',
+			data: { type: 'current_note', file: currentFile },
+		});
+	}
+	
+	// Add regular files
+	suggestions.push(...files.map(file => ({
 		id: `file_${file.path}`,
 		label: file.name,
 		description: file.path,
-		icon: 'F',
-		data: file,
-	}));
+		icon: '📄',
+		data: { type: 'file', file },
+	})));
+	
+	return suggestions;
 }
 
 /**
