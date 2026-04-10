@@ -62,9 +62,11 @@ npm install @agentclientprotocol/sdk
 
 ## 关键要求
 
-### 0. 所有对AGENTS.md的修改都需要我手动确认
+### 所有对AGENTS.md的修改都需要我手动确认
 
-### 1. 所有通信必须输出到 Console
+### 必须阅读ACP官方文档来确认功能实现方式
+
+### 所有通信必须输出到 Console
 
 为了方便前端开发者调试，所有关键通信步骤必须输出到 console：
 
@@ -75,7 +77,7 @@ console.log('[ACP] Received response:', response);
 console.error('[ACP] Error:', error);
 ```
 
-### 2. 禁止手写 ACP 协议
+### 禁止手写 ACP 协议
 
 ❌ **禁止这样写**:
 ```typescript
@@ -92,7 +94,7 @@ import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 const connection = new ClientSideConnection(clientHandler, stream);
 ```
 
-### 3. 使用 SDK 的标准流程
+### 使用 SDK 的标准流程
 
 ```typescript
 import { 

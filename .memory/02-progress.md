@@ -9,6 +9,60 @@
 
 ---
 
+## 2026-04-10 - 实现 ACP 会话能力并补齐回归测试
+
+**实现范围**:
+- `slash-commands`
+- `session-modes`
+- `agent-plan`
+- `session-config-options`
+
+**完成内容**:
+- `AcpBridgeAdapter` 现在真实调用官方 SDK 的 `session/set_config_option` 和 `session/set_mode`
+- `configOptions` 支持 `select` 与 `boolean`，并支持分组选项扁平化显示
+- 当 Agent 未返回 `configOptions` 时，UI 会自动回退到 `modes` 并继续可切换
+- `available_commands_update`、`config_option_update`、`current_mode_update`、`plan` 都会触发 UI 刷新
+- Agent slash command 选择后不再误执行内建命令，而是按协议插入 `/command` 文本
+- 聊天面板新增 plan 区域，显示当前 plan 和 mode
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test` 通过
+- `npm run build:quick` 通过
+- 全量单测: `9` 个文件，`76` 个测试全部通过
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/ui/chat-view.ts`
+- `src/ui/components/config-toolbar.tsx`
+- `src/ui/components/input-autocomplete.tsx`
+- `src/core/types.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+- `test/unit/slash-commands.test.ts`
+
+---
+
+## 2026-04-10 - 复核 ACP 协议任务清单
+
+**复核范围**:
+- `slash-commands`
+- `session-modes`
+- `agent-plan`
+- `session-config-options`
+
+**结论**:
+- `01-tasks.md` 原先只覆盖了斜杠命令基础提示，缺少 ACP 协议要求的动态更新、真实会话配置切换、mode 兼容层和 plan 可视化任务
+- 原有“Skill 支持”表述与本次复核的 ACP 官方章节不完全对应，已调整为 ACP Slash Commands / Session Config Options / Session Modes / Agent Plan 对应任务
+
+**已更新**:
+- `.memory/01-tasks.md`
+  - 新增 `available_commands_update` 动态更新与 `input.hint` 支持任务
+  - 新增 `session/set_config_option`、`config_option_update`、`session/set_mode`、`current_mode_update` 对应任务
+  - 新增 Agent Plan 面板和 ACP 协议回归测试任务
+  - 新增“ACP 协议能力补齐”状态表，区分部分完成与待实现项
+
+---
+
 ## 总体进度概览
 
 | 阶段 | 状态 | 完成度 |
@@ -20,6 +74,117 @@
 | Phase 4 - 历史对话保存功能 | ✅ 已完成 | 100% |
 | Phase 5 - agent命令支持 | ✅ 已完成 | 100% |
 | Phase 6 - UI-UX 优化 | ✅ 已完成 | 95% |
+
+---
+
+## 2026-04-10 - 完整实现 ACP 协议功能 ✅
+
+**错误纠正**: 之前错误地认为 ACP 协议不支持 skills/commands，实际上协议完整支持以下功能：
+
+### 已实现功能
+
+#### 1. Slash Commands (`available_commands_update`) ✅
+**协议文档**: https://agentclientprotocol.com/protocol/slash-commands
+
+**实现内容**:
+- Agent 可以通过 `available_commands_update` 通知发送可用命令列表
+- 在 `AgentLinkAcpClient.sessionUpdate` 中添加处理逻辑
+- 在 `AcpBridgeAdapter` 中存储 `availableCommands`
+- 添加 `getAvailableCommands()` 方法供 UI 使用
+- UI 中 `/` 命令现在显示：
+  - 内建命令（/clear、/help）
+  - Agent 提供的命令（如 /web、/test、/plan）
+
+**代码变更**:
+- `src/adapters/acp-bridge-adapter.ts`: 添加 `AvailableCommand` 类型和处理方法
+- `src/ui/chat-view.ts`: 使用 `getAvailableCommands()` 获取命令
+- `src/ui/components/input-autocomplete.tsx`: 添加 `createAvailableCommandSuggestions()`
+
+#### 2. Session Modes (`current_mode_update`) ✅
+**协议文档**: https://agentclientprotocol.com/protocol/session-modes
+
+**实现内容**:
+- 支持 `current_mode_update` 通知
+- 存储当前 mode ID
+- 添加 `getCurrentMode()` 方法
+- 在 session 初始化时保存初始 mode
+
+**代码变更**:
+- `src/adapters/acp-bridge-adapter.ts`: 添加 `currentMode` 状态和处理方法
+
+#### 3. Agent Plan (`plan`) ✅
+**协议文档**: https://agentclientprotocol.com/protocol/agent-plan
+
+**实现内容**:
+- 支持 `plan` 通知接收执行计划
+- 存储 plan entries（包含 content、priority、status）
+- 添加 `getPlan()` 方法供 UI 显示
+- 支持动态更新（Agent 可以随时更新计划）
+
+**代码变更**:
+- `src/adapters/acp-bridge-adapter.ts`: 添加 `PlanEntry` 类型和 `handlePlan()` 方法
+
+#### 4. Session Config Options (`config_option_update`) ✅
+**协议文档**: https://agentclientprotocol.com/protocol/session-config-options
+
+**实现内容**:
+- 已支持初始 session 的 configOptions
+- 新增支持 `config_option_update` 动态更新
+- Agent 可以主动更新配置选项
+- 保持配置选项的完整状态
+
+**代码变更**:
+- `src/adapters/acp-bridge-adapter.ts`: 添加 `handleConfigOptionUpdate()` 方法
+- 提取 `mapConfigOptions()` 用于统一映射逻辑
+
+### 新增类型定义
+
+```typescript
+// AvailableCommand - Slash Commands
+interface AvailableCommand {
+  name: string;
+  description: string;
+  input?: { hint: string };
+}
+
+// PlanEntry - Agent Plan
+interface PlanEntry {
+  content: string;
+  priority: 'high' | 'medium' | 'low';
+  status: 'pending' | 'in_progress' | 'completed';
+}
+```
+
+### 新增方法
+
+**AcpBridgeAdapter**:
+- `getAvailableCommands(): AvailableCommand[]` - 获取 slash commands
+- `getPlan(): PlanEntry[]` - 获取执行计划
+- `getCurrentMode(): string | null` - 获取当前模式
+- `handleAvailableCommands(commands)` - 处理命令更新
+- `handlePlan(entries)` - 处理计划更新
+- `handleCurrentModeUpdate(modeId)` - 处理模式更新
+- `handleConfigOptionUpdate(configOptions)` - 处理配置更新
+
+### 构建结果
+
+```
+✅ Build complete!
+Test Files  9 passed (9)
+     Tests  68 passed (68)
+
+main.js (854.2 KB)
+```
+
+### 测试步骤
+
+1. 连接 ACP Agent（如 Kimi）
+2. 输入 `/` 查看命令列表：
+   - 应显示内建命令（/clear、/help）
+   - 应显示 Agent 提供的命令（如 /web、/test）
+3. Agent 发送 plan 时，应在 UI 中显示
+4. Agent 切换 mode 时，应更新显示
+5. Agent 更新 config options 时，应同步更新
 
 ---
 

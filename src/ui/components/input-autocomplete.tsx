@@ -1,13 +1,13 @@
 import { h, FunctionComponent } from 'preact';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
 import type { TFile, TFolder } from 'obsidian';
-import type { Skill } from '../../core/types';
+import type { Skill, AvailableCommand } from '../../core/types';
 
 export type AutocompleteTrigger = 'slash' | 'mention' | 'topic' | null;
 
 type SuggestionSource = 'builtin' | 'agent';
 
-interface SuggestionItem {
+export interface SuggestionItem {
 	id: string;
 	label: string;
 	description?: string;
@@ -23,6 +23,10 @@ interface InputAutocompleteProps {
 	suggestions: SuggestionItem[];
 	onSelect: (item: SuggestionItem) => void | Promise<void>;
 	onClose: () => void;
+}
+
+export function buildAgentSlashCommandText(command: AvailableCommand): string {
+	return command.input ? `/${command.name} ` : `/${command.name}`;
 }
 
 /**
@@ -43,6 +47,8 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 }) => {
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const listRef = useRef<HTMLDivElement>(null);
+	const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
 
 	// 点击外部关闭
 	useEffect(() => {
@@ -127,6 +133,25 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 		return () => document.removeEventListener('keydown', handleKeyDown);
 	}, [handleKeyDown]);
 
+	useEffect(() => {
+		const listEl = listRef.current;
+		const selectedEl = itemRefs.current[selectedIndex];
+		if (!listEl || !selectedEl) {
+			return;
+		}
+
+		const itemTop = selectedEl.offsetTop;
+		const itemBottom = itemTop + selectedEl.offsetHeight;
+		const viewTop = listEl.scrollTop;
+		const viewBottom = viewTop + listEl.clientHeight;
+
+		if (itemTop < viewTop) {
+			listEl.scrollTop = itemTop;
+		} else if (itemBottom > viewBottom) {
+			listEl.scrollTop = itemBottom - listEl.clientHeight;
+		}
+	}, [selectedIndex, groupedItems]);
+
 	return (
 		<div 
 			ref={containerRef}
@@ -162,6 +187,7 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 			</div>
 			
 			<div 
+				ref={listRef}
 				className="agentlink-autocomplete-list"
 				style={{
 					maxHeight: '200px',
@@ -197,6 +223,9 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 
 					return (
 						<div
+							ref={(el) => {
+								itemRefs.current[navigableIndex] = el;
+							}}
 							key={item.id}
 							className={`agentlink-autocomplete-item ${isSelected ? 'is-selected' : ''}`}
 							onClick={async () => await handleSelect(navigableIndex)}
@@ -389,7 +418,25 @@ export function createSlashCommandSuggestions(): SuggestionItem[] {
 }
 
 /**
+ * Create suggestions from AvailableCommand objects (from ACP agent)
+ * Replaces createSkillSuggestions for ACP bridge adapter
+ */
+export function createAvailableCommandSuggestions(commands: AvailableCommand[]): SuggestionItem[] {
+	return commands.map(command => ({
+		id: command.name,
+		label: `/${command.name}`,
+		description: command.input?.hint
+			? `${command.description} (${command.input.hint})`
+			: command.description,
+		icon: '⚡',
+		source: 'agent',
+		data: command,
+	}));
+}
+
+/**
  * Create suggestions from Skill objects (from ACP agent)
+ * @deprecated Use createAvailableCommandSuggestions instead for ACP bridge adapter
  */
 export function createSkillSuggestions(skills: Skill[]): SuggestionItem[] {
 	return skills.map(skill => ({

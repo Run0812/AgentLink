@@ -10,7 +10,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, ConfigOptionValue, BUILTIN_COMMANDS, Skill } from '../core/types';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, PlanEntry } from '../core/types';
 import { h, render } from 'preact';
 import { ConfigToolbar } from './components/config-toolbar';
 import { CancellationError } from '../core/errors';
@@ -21,7 +21,8 @@ import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '
 import { SessionManager, SessionMetadata } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
 import { InputStateBar } from './components/input-state-bar';
-import { InputAutocomplete, createSlashCommandSuggestions, createSkillSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger } from './components/input-autocomplete';
+import { InputAutocomplete, createSlashCommandSuggestions, createAvailableCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger, buildAgentSlashCommandText } from './components/input-autocomplete';
+import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -79,11 +80,15 @@ export class ChatView extends ItemView {
 	// ── ACP Session Config ───────────────────────────────────────────────
 	private sessionConfig: SessionConfigState = { configOptions: [] };
 	private configButtonsContainer!: HTMLElement;
+	private planContainer!: HTMLElement;
+	private detachSessionStateListener?: () => void;
 
 	// ── Phase 5: Input State & Autocomplete ─────────────────────────────
 	private inputStateContainer!: HTMLElement;
 	private autocompleteContainer!: HTMLElement;
 	private isAutocompleteOpen = false;
+	private currentAutocompleteTrigger: AutocompleteTrigger = null;
+	private currentAutocompleteQuery = '';
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -122,15 +127,21 @@ export class ChatView extends ItemView {
 
 	/** Called by the plugin when settings change. */
 	setAdapter(adapter: AgentAdapter): void {
+		this.detachSessionStateListener?.();
 		this.adapter = adapter;
+		const acpAdapter = adapter as AcpBridgeAdapter & { subscribeSessionState?: (listener: () => void) => () => void };
+		this.detachSessionStateListener = acpAdapter.subscribeSessionState?.(() => {
+			void this.refreshSessionFeatures();
+			this.refreshAutocompleteFromInput();
+		});
 		this.refreshStatus();
-		void this.loadConfigOptions();
+		void this.refreshSessionFeatures();
 	}
 
 	refreshSettings(): void {
 		this.settings = this.onSettingsRead();
 		this.refreshStatus();
-		void this.loadConfigOptions();
+		void this.refreshSessionFeatures();
 		
 		// Update ToolExecutor config
 		this.toolExecutor.updateConfig({
@@ -173,6 +184,9 @@ export class ChatView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.detachSessionStateListener?.();
+		this.detachSessionStateListener = undefined;
+
 		if (this.configButtonsContainer) {
 			render(null, this.configButtonsContainer);
 		}
@@ -280,6 +294,12 @@ export class ChatView extends ItemView {
 		newChatBtn.addEventListener('mouseenter', () => newChatBtn.style.opacity = '1');
 		newChatBtn.addEventListener('mouseleave', () => newChatBtn.style.opacity = '0.7');
 		newChatBtn.addEventListener('click', () => this.createNewSession());
+
+		this.planContainer = container.createDiv({ cls: 'agentlink-session-plan' });
+		this.planContainer.style.display = 'none';
+		this.planContainer.style.padding = '0.45rem 0.6rem';
+		this.planContainer.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.planContainer.style.background = 'var(--background-secondary)';
 		
 		// Messages area
 		this.messagesEl = container.createDiv({ cls: 'agentlink-messages' });
@@ -434,6 +454,7 @@ export class ChatView extends ItemView {
 		this.modelSelectorBtn.style.color = 'var(--text-muted)';
 		this.modelSelectorBtn.style.whiteSpace = 'nowrap';
 		this.modelSelectorBtn.style.height = '24px';
+		this.modelSelectorBtn.style.display = 'none';
 		
 		const modelText = this.modelSelectorBtn.createEl('span', { text: 'Model' });
 		modelText.style.maxWidth = '80px';
@@ -449,6 +470,9 @@ export class ChatView extends ItemView {
 		const modelDropdown = modelContainer.createDiv();
 		modelDropdown.style.display = 'none';
 		this.modelSelectorBtn.addEventListener('click', (e) => {
+			if (!this.getModelConfigOption()) {
+				return;
+			}
 			e.stopPropagation();
 			const isOpen = modelDropdown.style.display !== 'none';
 			modelDropdown.style.display = isOpen ? 'none' : 'block';
@@ -491,8 +515,8 @@ export class ChatView extends ItemView {
 		this.stopBtn.style.display = 'none';
 		this.stopBtn.addEventListener('click', () => this.handleStop());
 
-		// Load and render configOptions from adapter
-		this.loadConfigOptions();
+		// Load and render ACP session state from adapter
+		void this.refreshSessionFeatures();
 
 		// Phase 5: Setup autocomplete listeners
 		this.setupAutocompleteListeners();
@@ -549,6 +573,13 @@ export class ChatView extends ItemView {
 	// ── Config Options (Dynamic rendering) ───────────────────────────────────
 
 	/** Load configOptions from adapter and render buttons */
+	private async refreshSessionFeatures(): Promise<void> {
+		await this.loadConfigOptions();
+		this.updateModelSelector();
+		this.renderPlanPanel();
+	}
+
+	/** Load configOptions from adapter and render buttons */
 	private async loadConfigOptions(): Promise<void> {
 		if (!this.configButtonsContainer) return;
 
@@ -559,7 +590,7 @@ export class ChatView extends ItemView {
 		render(
 			h(ConfigToolbar, {
 				options: configOptions,
-				onSelect: async (configId: string, value: string) => {
+				onSelect: async (configId: string, value: string | boolean) => {
 					await this.handleConfigOptionChange(configId, value);
 				},
 			}),
@@ -567,26 +598,141 @@ export class ChatView extends ItemView {
 		);
 	}
 
-	private async handleConfigOptionChange(configId: string, value: string): Promise<void> {
+	private async handleConfigOptionChange(configId: string, value: string | boolean): Promise<void> {
 		const target = this.sessionConfig.configOptions.find((o) => o.id === configId);
 		if (!target) return;
-
-		const selected = target.options.find((v) => v.value === value);
-		if (!selected) return;
 
 		try {
 			const updated = this.adapter?.setConfigOption
 				? await this.adapter.setConfigOption(configId, value)
 				: this.sessionConfig.configOptions.map((o) =>
-						o.id === configId ? { ...o, currentValue: value } : o,
+						o.id === configId
+							? o.type === 'boolean'
+								? { ...o, currentValue: Boolean(value) }
+								: { ...o, currentValue: String(value) }
+							: o,
 				  );
 
 			this.sessionConfig = { configOptions: updated };
-			new Notice(`${target.name}: ${selected.name}`);
-			await this.loadConfigOptions();
+			const selectedLabel = target.type === 'select'
+				? target.options.find((item) => item.value === value)?.name ?? String(value)
+				: value ? 'On' : 'Off';
+			new Notice(`${target.name}: ${selectedLabel}`);
+			await this.refreshSessionFeatures();
 		} catch (error) {
 			logger.error('Failed to set config option:', error);
 			new Notice(`Failed to set ${target.name}`);
+		}
+	}
+
+	private getModelConfigOption(): ConfigOption | null {
+		const modelOption = this.sessionConfig.configOptions.find(
+			(option) => option.category === 'model' && option.type === 'select',
+		);
+		return modelOption ?? null;
+	}
+
+	private updateModelSelector(): void {
+		if (!this.modelSelectorBtn) {
+			return;
+		}
+
+		const modelOption = this.getModelConfigOption();
+		const labelEl = this.modelSelectorBtn.querySelector('span') as HTMLElement | null;
+		const hasSelectableModels = Boolean(modelOption && modelOption.type === 'select' && modelOption.options.length > 1);
+
+		this.modelSelectorBtn.style.display = hasSelectableModels ? 'flex' : 'none';
+
+		if (!labelEl) {
+			return;
+		}
+
+		if (!modelOption || modelOption.type !== 'select') {
+			labelEl.textContent = 'Model';
+			return;
+		}
+
+		const current = modelOption.options.find((item) => item.value === modelOption.currentValue);
+		labelEl.textContent = current?.name ?? modelOption.name;
+	}
+
+	private renderPlanPanel(): void {
+		if (!this.planContainer) return;
+
+		const plan = this.adapter?.getPlan?.() ?? [];
+		this.planContainer.empty();
+
+		if (plan.length === 0) {
+			this.planContainer.style.display = 'none';
+			return;
+		}
+
+		this.planContainer.style.display = 'block';
+
+		const titleRow = this.planContainer.createDiv();
+		titleRow.style.display = 'flex';
+		titleRow.style.alignItems = 'center';
+		titleRow.style.justifyContent = 'space-between';
+		titleRow.style.marginBottom = '0.25rem';
+
+		const title = titleRow.createEl('span', { text: 'Plan' });
+		title.style.fontSize = '0.72rem';
+		title.style.fontWeight = '600';
+
+		const modeLabel = this.adapter?.getCurrentMode?.();
+		if (modeLabel) {
+			const modeBadge = titleRow.createEl('span', { text: modeLabel });
+			modeBadge.style.fontSize = '0.68rem';
+			modeBadge.style.color = 'var(--text-muted)';
+		}
+
+		for (const entry of plan) {
+			this.renderPlanEntry(entry);
+		}
+	}
+
+	private renderPlanEntry(entry: PlanEntry): void {
+		const row = this.planContainer.createDiv();
+		row.style.display = 'flex';
+		row.style.alignItems = 'flex-start';
+		row.style.gap = '0.4rem';
+		row.style.padding = '0.15rem 0';
+
+		const marker = row.createEl('span', { text: this.getPlanMarker(entry.status) });
+		marker.style.flexShrink = '0';
+		marker.style.color = this.getPlanColor(entry.status);
+
+		const content = row.createDiv();
+		content.style.minWidth = '0';
+
+		const text = content.createEl('div', { text: entry.content });
+		text.style.fontSize = '0.75rem';
+		text.style.color = 'var(--text-normal)';
+
+		const meta = content.createEl('div', { text: `${entry.status} · ${entry.priority}` });
+		meta.style.fontSize = '0.68rem';
+		meta.style.color = 'var(--text-muted)';
+	}
+
+	private getPlanMarker(status: PlanEntry['status']): string {
+		switch (status) {
+			case 'completed':
+				return '●';
+			case 'in_progress':
+				return '◐';
+			default:
+				return '○';
+		}
+	}
+
+	private getPlanColor(status: PlanEntry['status']): string {
+		switch (status) {
+			case 'completed':
+				return 'var(--color-green)';
+			case 'in_progress':
+				return 'var(--color-orange)';
+			default:
+				return 'var(--text-faint)';
 		}
 	}
 
@@ -1500,6 +1646,12 @@ export class ChatView extends ItemView {
 
 	/** Render Model selector dropdown */
 	private renderModelDropdown(container: HTMLElement): void {
+		const modelOption = this.getModelConfigOption();
+		if (!modelOption || modelOption.type !== 'select' || modelOption.options.length <= 1) {
+			container.style.display = 'none';
+			return;
+		}
+
 		container.empty();
 		container.style.display = 'block';
 		container.style.position = 'absolute';
@@ -1522,13 +1674,7 @@ export class ChatView extends ItemView {
 		header.style.marginBottom = '0.2rem';
 		header.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		const models = [
-			{ id: 'default', name: 'Default', desc: 'Use backend default' },
-			{ id: 'fast', name: 'Fast', desc: 'Quicker responses' },
-			{ id: 'quality', name: 'Quality', desc: 'Better responses' },
-		];
-
-		for (const model of models) {
+		for (const model of modelOption.options) {
 			const item = container.createEl('button');
 			item.type = 'button';
 			item.style.width = '100%';
@@ -1537,7 +1683,9 @@ export class ChatView extends ItemView {
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
-			item.style.background = 'transparent';
+			item.style.background = model.value === modelOption.currentValue
+				? 'var(--background-modifier-hover)'
+				: 'transparent';
 			item.style.color = 'var(--text-normal)';
 			item.style.textAlign = 'left';
 			item.style.cursor = 'pointer';
@@ -1546,40 +1694,15 @@ export class ChatView extends ItemView {
 			name.style.fontSize = '0.75rem';
 			name.style.fontWeight = '600';
 
-			const desc = item.createEl('div', { text: model.desc });
+			const desc = item.createEl('div', { text: model.description ?? '' });
 			desc.style.fontSize = '0.7rem';
 			desc.style.color = 'var(--text-muted)';
 
-			item.addEventListener('click', () => {
-				const btnText = this.modelSelectorBtn.querySelector('span');
-				if (btnText) btnText.textContent = model.name;
+			item.addEventListener('click', async () => {
+				await this.handleConfigOptionChange(modelOption.id, model.value);
 				container.style.display = 'none';
-				new Notice(`Model: ${model.name}`);
 			});
 		}
-
-		const configureItem = container.createEl('button');
-		configureItem.type = 'button';
-		configureItem.style.width = '100%';
-		configureItem.style.display = 'block';
-		configureItem.style.padding = '0.35rem 0.4rem';
-		configureItem.style.marginTop = '0.2rem';
-		configureItem.style.border = 'none';
-		configureItem.style.borderTop = '1px solid var(--background-modifier-border)';
-		configureItem.style.borderRadius = '0';
-		configureItem.style.background = 'transparent';
-		configureItem.style.color = 'var(--text-muted)';
-		configureItem.style.textAlign = 'left';
-		configureItem.style.cursor = 'pointer';
-		configureItem.style.fontSize = '0.7rem';
-		configureItem.textContent = 'Configure...';
-		configureItem.addEventListener('click', () => {
-			container.style.display = 'none';
-			// @ts-ignore
-			this.app.setting.open();
-			// @ts-ignore
-			this.app.setting.openTabById('agentlink');
-		});
 	}
 
 	/** Render Thinking intensity dropdown */
@@ -1906,9 +2029,6 @@ export class ChatView extends ItemView {
 	private setupAutocompleteListeners(): void {
 		if (!this.inputEl) return;
 
-		let currentTrigger: AutocompleteTrigger = null;
-		let currentQuery = '';
-
 		this.inputEl.addEventListener('input', (e) => {
 			const value = this.inputEl.value;
 			const cursorPos = this.inputEl.selectionStart || 0;
@@ -1935,19 +2055,27 @@ export class ChatView extends ItemView {
 				.sort((a, b) => b.index - a.index)[0];
 
 			if (activeTrigger) {
-				currentTrigger = activeTrigger.type;
-				currentQuery = textBeforeCursor.substring(activeTrigger.index + 1);
+				this.currentAutocompleteTrigger = activeTrigger.type;
+				this.currentAutocompleteQuery = textBeforeCursor.substring(activeTrigger.index + 1);
 			} else {
-				currentTrigger = null;
-				currentQuery = '';
+				this.currentAutocompleteTrigger = null;
+				this.currentAutocompleteQuery = '';
 			}
 
-			if (currentTrigger) {
-				this.showAutocomplete(currentTrigger, currentQuery);
+			if (this.currentAutocompleteTrigger) {
+				this.showAutocomplete(this.currentAutocompleteTrigger, this.currentAutocompleteQuery);
 			} else {
 				this.hideAutocomplete();
 			}
 		});
+	}
+
+	private refreshAutocompleteFromInput(): void {
+		if (!this.isAutocompleteOpen || !this.currentAutocompleteTrigger) {
+			return;
+		}
+
+		this.showAutocomplete(this.currentAutocompleteTrigger, this.currentAutocompleteQuery);
 	}
 
 	/** Show autocomplete menu */
@@ -1964,9 +2092,9 @@ export class ChatView extends ItemView {
 				s.label.toLowerCase().includes(query.toLowerCase())
 			);
 			
-			// Get agent skills from adapter
-			const agentSkills = this.adapter?.getSkills?.() || [];
-			const agentSuggestions = createSkillSuggestions(agentSkills).filter(s =>
+			// Get available commands from ACP adapter
+			const availableCommands = this.adapter?.getAvailableCommands?.() || [];
+			const agentSuggestions = createAvailableCommandSuggestions(availableCommands).filter(s =>
 				s.label.toLowerCase().includes(query.toLowerCase())
 			);
 			
@@ -2037,6 +2165,8 @@ export class ChatView extends ItemView {
 	/** Hide autocomplete menu */
 	private hideAutocomplete(): void {
 		this.isAutocompleteOpen = false;
+		this.currentAutocompleteTrigger = null;
+		this.currentAutocompleteQuery = '';
 		if (this.autocompleteContainer) {
 			render(null, this.autocompleteContainer);
 		}
@@ -2044,7 +2174,7 @@ export class ChatView extends ItemView {
 
 	/** Handle autocomplete item selection */
 	private async handleAutocompleteSelect(
-		item: { id: string; label: string; description?: string; icon?: string; data?: unknown },
+		item: { id: string; label: string; description?: string; icon?: string; data?: unknown; source?: 'builtin' | 'agent' },
 		trigger: AutocompleteTrigger
 	): Promise<void> {
 		const value = this.inputEl.value;
@@ -2053,16 +2183,23 @@ export class ChatView extends ItemView {
 		const textAfterCursor = value.substring(cursorPos);
 
 		let newText = '';
+		let newCursorPos = 0;
 		if (trigger === 'slash') {
-			// Execute slash command
 			const lastSlash = textBeforeCursor.lastIndexOf('/');
 			const commandId = item.id;
-			
-			// Execute the command
-			await this.executeSlashCommand(commandId);
-			
-			// Remove the slash trigger text from input
-			newText = textBeforeCursor.substring(0, lastSlash) + textAfterCursor;
+
+			if (item.source === 'agent') {
+				const command = item.data as { name: string; description: string; input?: { hint: string } | null } | undefined;
+				const insertion = command
+					? buildAgentSlashCommandText(command)
+					: `/${commandId}`;
+				newText = textBeforeCursor.substring(0, lastSlash) + insertion + textAfterCursor;
+				newCursorPos = textBeforeCursor.substring(0, lastSlash).length + insertion.length;
+			} else {
+				await this.executeSlashCommand(commandId);
+				newText = textBeforeCursor.substring(0, lastSlash) + textAfterCursor;
+				newCursorPos = textBeforeCursor.substring(0, lastSlash).length;
+			}
 		} else if (trigger === 'mention') {
 			// Handle file/folder mention: attach as file and update input
 			const lastAt = textBeforeCursor.lastIndexOf('@');
@@ -2080,14 +2217,17 @@ export class ChatView extends ItemView {
 			
 			// Remove the @ trigger text from input
 			newText = textBeforeCursor.substring(0, lastAt) + textAfterCursor;
+			newCursorPos = textBeforeCursor.substring(0, lastAt).length;
 		} else if (trigger === 'topic') {
 			// Replace #topic with the topic reference
 			const lastHash = textBeforeCursor.lastIndexOf('#');
 			newText = textBeforeCursor.substring(0, lastHash) + '#' + item.label + ' ' + textAfterCursor;
+			newCursorPos = textBeforeCursor.substring(0, lastHash).length + item.label.length + 2;
 		}
 
 		this.inputEl.value = newText;
 		this.inputEl.focus();
+		this.inputEl.setSelectionRange(newCursorPos, newCursorPos);
 	}
 
 	/** Handle attach file button click */

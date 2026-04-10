@@ -20,8 +20,13 @@ import {
 	ToolCall,
 	ToolResult,
 	ConfigOption,
+	ConfigOptionValue,
+	ConfigOptionCategory,
 	AcpBridgeBackendConfig,
 	Skill,
+	AvailableCommand,
+	PlanEntry,
+	SessionModeOption,
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
@@ -82,7 +87,7 @@ class AgentLinkAcpClient implements acp.Client {
 		const update = params.update;
 		console.log('[ACP Client] sessionUpdate:', update.sessionUpdate);
 
-		switch (update.sessionUpdate) {
+			switch (update.sessionUpdate) {
 			case 'agent_message_chunk':
 				if (update.content.type === 'text' && update.content.text) {
 					console.log('[ACP Client] Agent message:', update.content.text.substring(0, 100));
@@ -119,6 +124,22 @@ class AgentLinkAcpClient implements acp.Client {
 
 			case 'plan':
 				console.log('[ACP Client] Plan update with', update.entries?.length, 'entries');
+				this.adapter.handlePlan(update.entries);
+				break;
+
+			case 'available_commands_update':
+				console.log('[ACP Client] Available commands update:', update.availableCommands?.length ?? 0);
+				this.adapter.handleAvailableCommands(update.availableCommands);
+				break;
+
+			case 'current_mode_update':
+				console.log('[ACP Client] Current mode update:', update.currentModeId);
+				this.adapter.handleCurrentModeUpdate(update.currentModeId);
+				break;
+
+			case 'config_option_update':
+				console.log('[ACP Client] Config option update:', update.configOptions?.length ?? 0);
+				this.adapter.handleConfigOptionUpdate(update.configOptions);
 				break;
 
 			case 'user_message_chunk':
@@ -283,6 +304,11 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private sessionId: string | null = null;
 	private serverCapabilities: AgentCapability[] = [];
 	private configOptions: ConfigOption[] = [];
+	private sessionModes: SessionModeOption[] = [];
+	private availableCommands: AvailableCommand[] = [];
+	private plan: PlanEntry[] = [];
+	private currentMode: string | null = null;
+	private sessionStateListeners = new Set<() => void>();
 	
 	// Streaming handlers
 	private currentHandlers: StreamHandlers | null = null;
@@ -303,6 +329,13 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	updateConfig(config: Partial<AcpBridgeAdapterConfig>): void {
 		this.config = { ...this.config, ...config };
 		console.log('[ACP Adapter] Config updated');
+	}
+
+	subscribeSessionState(listener: () => void): () => void {
+		this.sessionStateListeners.add(listener);
+		return () => {
+			this.sessionStateListeners.delete(listener);
+		};
 	}
 
 	// ── Connection Management ────────────────────────────────────────────────
@@ -476,29 +509,82 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// ── Config Options (ACP Session Config Options) ────────────────────────
 
 	getConfigOptions(): ConfigOption[] {
-		return this.configOptions;
+		if (this.configOptions.length > 0) {
+			return this.configOptions;
+		}
+
+		if (this.sessionModes.length === 0) {
+			return [];
+		}
+
+		return [{
+			id: 'mode',
+			name: 'Mode',
+			description: 'Agent session mode',
+			category: 'mode',
+			type: 'select',
+			currentValue: this.currentMode ?? this.sessionModes[0]?.id ?? '',
+			options: this.sessionModes.map((mode) => ({
+				value: mode.id,
+				name: mode.name,
+				description: mode.description,
+			})),
+		}];
 	}
 
-	async setConfigOption(configId: string, value: string): Promise<ConfigOption[]> {
+	getAvailableCommands(): AvailableCommand[] {
+		return this.availableCommands;
+	}
+
+	getPlan(): PlanEntry[] {
+		return this.plan;
+	}
+
+	getCurrentMode(): string | null {
+		return this.currentMode;
+	}
+
+	getSessionModes(): SessionModeOption[] {
+		return this.sessionModes;
+	}
+
+	async setConfigOption(configId: string, value: string | boolean): Promise<ConfigOption[]> {
 		console.log('[ACP Adapter] Setting config option:', configId, '=', value);
 		
 		if (!this.connection || !this.sessionId) {
 			throw new Error('Not connected');
 		}
 
-		// Update local configOptions optimistically
-		const option = this.configOptions.find(o => o.id === configId);
-		if (option) {
-			option.currentValue = value;
-			console.log('[ACP Adapter] Config option updated locally');
-			console.log('[ACP Adapter] Updated:', this.configOptions.map(o => `${o.id}=${o.currentValue}`).join(', '));
+		if (this.shouldUseModeFallback(configId, value)) {
+			const modeId = String(value);
+			console.log('[ACP Adapter] Using session/set_mode fallback:', modeId);
+			await this.connection.setSessionMode({
+				sessionId: this.sessionId,
+				modeId,
+			});
+			this.currentMode = modeId;
+			this.emitSessionStateChange();
+			return this.getConfigOptions();
 		}
-		
-		// Note: Full JSON-RPC call would need SDK support
-		// For now, we update locally and log the attempt
-		console.log('[ACP Adapter] Note: Full setConfigOption JSON-RPC call pending SDK support');
-		
-		return this.configOptions;
+
+		const response = await this.connection.setSessionConfigOption(
+			typeof value === 'boolean'
+				? {
+					sessionId: this.sessionId,
+					configId,
+					type: 'boolean',
+					value,
+				}
+				: {
+					sessionId: this.sessionId,
+					configId,
+					value,
+				},
+		);
+		this.configOptions = this.mapConfigOptions(response.configOptions);
+		console.log('[ACP Adapter] Config option updated from agent response:', this.describeConfigOptions(this.configOptions));
+		this.emitSessionStateChange();
+		return this.getConfigOptions();
 	}
 
 	// ── Tool Execution ───────────────────────────────────────────────────────
@@ -617,6 +703,38 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				this.currentHandlers.onChunk(resultMsg);
 			}
 		}
+	}
+
+	handleAvailableCommands(commands: Array<{ name: string; description: string; input?: unknown | null }> = []): void {
+		this.availableCommands = commands.map((command) => ({
+			name: command.name,
+			description: command.description,
+			input: this.mapAvailableCommandInput(command.input),
+		}));
+		console.log('[ACP Adapter] Available commands updated:', this.availableCommands.map((command) => command.name).join(', ') || '(none)');
+		this.emitSessionStateChange();
+	}
+
+	handleCurrentModeUpdate(modeId: string | null | undefined): void {
+		this.currentMode = modeId ?? null;
+		console.log('[ACP Adapter] Current mode updated:', this.currentMode ?? '(none)');
+		this.emitSessionStateChange();
+	}
+
+	handleConfigOptionUpdate(configOptions: unknown): void {
+		this.configOptions = this.mapConfigOptions(configOptions);
+		console.log('[ACP Adapter] Config options updated:', this.describeConfigOptions(this.configOptions));
+		this.emitSessionStateChange();
+	}
+
+	handlePlan(entries: PlanEntry[] = []): void {
+		this.plan = entries.map((entry) => ({
+			content: entry.content,
+			priority: entry.priority,
+			status: entry.status,
+		}));
+		console.log('[ACP Adapter] Plan updated:', this.plan.map((entry) => `${entry.status}:${entry.content}`).join(' | ') || '(none)');
+		this.emitSessionStateChange();
 	}
 
 	// ── Private Methods ──────────────────────────────────────────────────────
@@ -770,34 +888,21 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			});
 
 			this.sessionId = response.sessionId;
+			this.sessionModes = this.mapSessionModes(response.modes?.availableModes);
+			this.currentMode = response.modes?.currentModeId ?? null;
 			console.log('[ACP Adapter] ✅ Session created!');
 			console.log('[ACP Adapter] Session ID:', this.sessionId);
 			console.log('[ACP Adapter] Current mode:', response.modes?.currentModeId);
 			console.log('[ACP Adapter] Current model:', response.models?.currentModelId);
+			console.log('[ACP Adapter] Available modes:', this.sessionModes.map((mode) => mode.id).join(', ') || '(none)');
 
 			// Store configOptions from session response (ACP Session Config Options)
 			const respAny = response as any;
 			if (respAny.configOptions && respAny.configOptions.length > 0) {
-				this.configOptions = [];
-				for (const opt of respAny.configOptions) {
-					if (opt.type === 'select' && opt.options) {
-						this.configOptions.push({
-							id: opt.id,
-							name: opt.name,
-							description: opt.description ?? undefined,
-							category: (opt.category as any) ?? undefined,
-							type: 'select',
-							currentValue: opt.currentValue,
-							options: opt.options.map((v: any) => ({
-								value: v.value,
-								name: v.name,
-								description: v.description ?? undefined,
-							})),
-						});
-					}
-				}
-				console.log('[ACP Adapter] Config options received:', this.configOptions.map(o => `${o.id}=${o.currentValue}`).join(', '));
+				this.configOptions = this.mapConfigOptions(respAny.configOptions);
+				console.log('[ACP Adapter] Config options received:', this.describeConfigOptions(this.configOptions));
 			}
+			this.emitSessionStateChange();
 
 		} catch (error) {
 			console.error('[ACP Adapter] Create session failed:', error);
@@ -827,6 +932,169 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		return capabilities;
 	}
 
+	private mapAvailableCommandInput(input: unknown): AvailableCommand['input'] {
+		if (!input || typeof input !== 'object') {
+			return null;
+		}
+
+		if ('hint' in input && typeof input.hint === 'string') {
+			return { hint: input.hint };
+		}
+
+		return null;
+	}
+
+	private mapSessionModes(modes: unknown): SessionModeOption[] {
+		if (!Array.isArray(modes)) {
+			return [];
+		}
+
+		return modes
+			.filter((mode): mode is { id: string; name: string; description?: string | null } =>
+				Boolean(mode && typeof mode === 'object' && 'id' in mode && 'name' in mode),
+			)
+			.map((mode) => ({
+				id: mode.id,
+				name: mode.name,
+				description: mode.description ?? undefined,
+			}));
+	}
+
+	private mapConfigOptions(configOptions: unknown): ConfigOption[] {
+		if (!Array.isArray(configOptions)) {
+			return [];
+		}
+
+		const mappedOptions: ConfigOption[] = [];
+
+		for (const option of configOptions) {
+			if (!option || typeof option !== 'object') {
+				continue;
+			}
+
+			const opt = option as {
+				id?: string;
+				name?: string;
+				description?: string;
+				category?: string;
+				type?: string;
+				currentValue?: string | boolean;
+				options?: Array<
+					{ value?: string; name?: string; description?: string } |
+					{ group?: string; name?: string; options?: Array<{ value?: string; name?: string; description?: string }> }
+				>;
+			};
+
+			if (!opt.id || !opt.name) {
+				continue;
+			}
+
+			if (opt.type === 'boolean' && typeof opt.currentValue === 'boolean') {
+				mappedOptions.push({
+					id: opt.id,
+					name: opt.name,
+					description: opt.description ?? undefined,
+					category: this.mapConfigOptionCategory(opt.category),
+					type: 'boolean',
+					currentValue: opt.currentValue,
+				});
+				continue;
+			}
+
+			if (opt.type !== 'select' || !Array.isArray(opt.options)) {
+				continue;
+			}
+
+			const values = this.flattenConfigOptionValues(opt.options);
+			if (values.length === 0) {
+				continue;
+			}
+
+			mappedOptions.push({
+				id: opt.id,
+				name: opt.name,
+				description: opt.description ?? undefined,
+				category: this.mapConfigOptionCategory(opt.category),
+				type: 'select',
+				currentValue: typeof opt.currentValue === 'string' ? opt.currentValue : '',
+				options: values,
+			});
+		}
+
+		return mappedOptions;
+	}
+
+	private flattenConfigOptionValues(
+		options: Array<
+			{ value?: string; name?: string; description?: string } |
+			{ group?: string; name?: string; options?: Array<{ value?: string; name?: string; description?: string }> }
+		>,
+	): ConfigOptionValue[] {
+		const values: ConfigOptionValue[] = [];
+
+		for (const option of options) {
+			if (!option || typeof option !== 'object') {
+				continue;
+			}
+
+			if ('value' in option && typeof option.value === 'string' && typeof option.name === 'string') {
+				values.push({
+					value: option.value,
+					name: option.name,
+					description: option.description ?? undefined,
+				});
+				continue;
+			}
+
+			if ('options' in option && Array.isArray(option.options)) {
+				const groupName = typeof option.name === 'string' ? option.name : undefined;
+				for (const nested of option.options) {
+					if (!nested?.value || !nested?.name) {
+						continue;
+					}
+					values.push({
+						value: nested.value,
+						name: groupName ? `${groupName} / ${nested.name}` : nested.name,
+						description: nested.description ?? undefined,
+					});
+				}
+			}
+		}
+
+		return values;
+	}
+
+	private mapConfigOptionCategory(category: unknown): ConfigOptionCategory | undefined {
+		if (category === 'mode' || category === 'model' || category === 'thought_level') {
+			return category;
+		}
+
+		if (typeof category === 'string' && category.startsWith('_')) {
+			return category as ConfigOptionCategory;
+		}
+
+		return undefined;
+	}
+
+	private shouldUseModeFallback(configId: string, value: string | boolean): boolean {
+		return (
+			configId === 'mode' &&
+			typeof value === 'string' &&
+			this.configOptions.length === 0 &&
+			this.sessionModes.some((mode) => mode.id === value)
+		);
+	}
+
+	private describeConfigOptions(configOptions: ConfigOption[]): string {
+		return configOptions.map((option) => `${option.id}=${String(option.currentValue)}`).join(', ') || '(none)';
+	}
+
+	private emitSessionStateChange(): void {
+		for (const listener of this.sessionStateListeners) {
+			listener();
+		}
+	}
+
 	private async cleanup(): Promise<void> {
 		console.log('[ACP Adapter] Cleaning up...');
 
@@ -843,10 +1111,16 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		this.sessionId = null;
 		this.serverCapabilities = [];
+		this.configOptions = [];
+		this.sessionModes = [];
+		this.availableCommands = [];
+		this.plan = [];
+		this.currentMode = null;
 		this.currentHandlers = null;
 		this.responseBuffer = [];
 		this.thinkingBuffer = [];
 		this.onThinkingChunk = undefined;
+		this.emitSessionStateChange();
 
 		console.log('[ACP Adapter] Cleanup complete');
 	}

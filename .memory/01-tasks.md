@@ -1,8 +1,8 @@
 # AgentLink 开发任务目标
 
 > 长期任务看板 - 记录项目的功能需求、开发阶段和待办事项
-> 
-> **使用方式**: 
+>
+> **使用方式**:
 > - 在添加新功能点时，在此文件末尾添加新的任务项
 > - 完成功能点后，将对应任务项标记为 `[x]` 并移动到"最近完成"区域
 > - 定期清理已完成的旧任务
@@ -14,8 +14,8 @@
 **AgentLink** 是一个 Obsidian 桌面端插件，作为本地 AI Agent 的统一前端。
 
 **核心定位**:
-- ✅ 连接本地运行的 Agent 进程（Claude Code CLI、Kimi Code、OpenCode Web 等）
-- ❌ 不是直接调用 LLM API（如 OpenAI API）
+- 连接本地运行的 Agent 进程（Claude Code CLI、Kimi Code、OpenCode Web 等）
+- 不是直接调用 LLM API（如 OpenAI API）
 
 ---
 
@@ -23,21 +23,21 @@
 
 | 阶段 | 状态 | 完成度 |
 |------|------|--------|
-| Phase 0 - 项目基础 | ✅ 完成 | 100% |
-| Phase 1 - 核心类型定义 | ✅ 完成 | 100% |
-| Phase 2 - 工具调用机制 | ✅ 完成 | 100% |
-| Phase 3 - ACP Bridge Mode | ✅ 完成 | 100% |
-| Phase 4 - 历史对话保存 | ✅ 完成 | 100% |
-| Phase 5 - agent命令支持 | ✅ 完成 | 100% |
-| Phase 6 - UI-UX 优化 | 🟡 进行中 | 0% |
+| Phase 0 - 项目基础 | 完成 | 100% |
+| Phase 1 - 核心类型定义 | 完成 | 100% |
+| Phase 2 - 工具调用机制 | 完成 | 100% |
+| Phase 3 - ACP Bridge Mode | 完成 | 100% |
+| Phase 4 - 历史对话保存 | 完成 | 100% |
+| Phase 5 - agent命令支持 | 完成 | 100% |
+| Phase 6 - UI-UX 优化 | 进行中 | 0% |
 
 ---
 
 ## 当前焦点任务
 
-### 🔴 Phase 6 - UI-UX 优化（当前重点）
+### Phase 6 - UI-UX 优化（当前重点）
 
-**目标**: 修复 UI 交互问题，完善 Phase 5 的 @mention 和 /command 功能
+**目标**: 修复 UI 交互问题，并补齐 ACP Slash Commands / Session Modes / Agent Plan / Session Config Options 的用户可见能力
 
 详细任务文档: [phase6-tasks.md](./phase6-tasks.md)
 
@@ -48,14 +48,19 @@
 - [ ] **@current note 整合** - 将 Current note 按钮整合到 @ 菜单中
 - [ ] **@ 和 / 整体渲染** - 引用文本以标签样式显示
 
-#### 命令与技能
-- [ ] **/ 命令功能验证** - 验证所有 / 命令正常工作
-- [ ] **/ 命令测试脚本** - 创建单元测试
-- [ ] **Skill 支持** - 从 MCP 获取 skills 并整合到 / 菜单
+#### ACP 命令与会话配置
+- [x] **/ 命令功能验证** - 区分内建命令与 Agent `availableCommands`，避免将 Agent 命令误当作内建命令执行
+- [x] **Agent Slash Command 输入提示** - 支持 `availableCommands.input.hint`，选择后插入 `/command ` 文本而不是直接执行错误动作
+- [x] **Slash Commands 动态更新** - 正确处理 `available_commands_update` 的增删改，并在当前会话中即时反映到 UI
+- [x] **Session Config Options 完整支持** - 使用官方 SDK 调用 `session/set_config_option`，按 Agent 提供的顺序和 category 渲染
+- [x] **Session Config 动态刷新** - 收到 `config_option_update` 后立即刷新工具栏，不再显示伪造默认选项
+- [x] **Session Modes 兼容支持** - 当 Agent 未提供 `configOptions` 时回退到 `modes`，支持 `session/set_mode` 与 `current_mode_update`
+- [x] **Agent Plan 面板** - 展示 `plan` entries，并按协议使用完整列表替换当前 plan
+- [x] **ACP 协议回归测试** - 覆盖 `available_commands_update`、`current_mode_update`、`plan`、`config_option_update` 以及 `set_mode` / `set_config_option`
 
 ---
 
-### 🟢 Phase 5 - Agent 命令支持（已完成）
+### Phase 5 - Agent 命令支持（已完成）
 
 #### `/` 斜杠命令自动提示
 - [x] 在输入框中输入 `/` 时显示命令列表
@@ -66,8 +71,8 @@
 - [x] 在输入框中输入 `@` 时显示文件/文件夹选择器
 - [x] 支持模糊搜索匹配文件名/路径
 - [x] 引用项以标签形式显示在**输入状态栏**（位于输入框上方，参考 05-ui-ux.md 第 2.4 节）
-- [x] 每个引用标签显示类型图标（文件夹📁/文件📄）
-- [x] 支持点击标签上的 ✕ 删除引用
+- [x] 每个引用标签显示类型图标（文件夹/文件）
+- [x] 支持点击标签上的删除按钮
 - [x] 发送消息时将引用内容作为上下文附加
 
 ---
@@ -95,58 +100,70 @@
 
 ## 功能需求清单
 
-### 插件基础能力 ✅
+### 插件基础能力
 | 需求 | 状态 |
 |------|------|
-| Obsidian 社区插件结构 | ✅ |
-| Ribbon Icon | ✅ |
-| Command: Open Local Agent Chat | ✅ |
-| Command: Send selected text to agent | ✅ |
-| Command: Switch backend type | ✅ |
+| Obsidian 社区插件结构 | 已完成 |
+| Ribbon Icon | 已完成 |
+| Command: Open Local Agent Chat | 已完成 |
+| Command: Send selected text to agent | 已完成 |
+| Command: Switch backend type | 已完成 |
 
-### 聊天面板 ✅
+### 聊天面板
 | UI 组件 | 状态 |
 |---------|------|
-| 标题栏 | ✅ |
-| 后端状态显示 | ✅ |
-| 消息列表区 | ✅ |
-| 输入框 | ✅ |
-| 发送/停止按钮 | ✅ |
-| Agent 工具调用预览 | ✅ |
-| 思维链分离显示 | ✅ |
-| Markdown 渲染支持 | ✅ |
-| 确认/拒绝操作按钮 | ✅ |
+| 标题栏 | 已完成 |
+| 后端状态显示 | 已完成 |
+| 消息列表区 | 已完成 |
+| 输入框 | 已完成 |
+| 发送/停止按钮 | 已完成 |
+| Agent 工具调用预览 | 已完成 |
+| 思维链分离显示 | 已完成 |
+| Markdown 渲染支持 | 已完成 |
+| 确认/拒绝操作按钮 | 已完成 |
 
-### ACP Bridge Mode ✅
+### ACP Bridge Mode
 | 功能 | 状态 |
 |------|------|
-| JSON-RPC 2.0 消息格式 | ✅ |
-| stdio 通信层 | ✅ |
-| 连接管理 | ✅ |
-| 消息处理 | ✅ |
-| 工具调用机制 | ✅ |
-| 会话管理 | ✅ |
+| JSON-RPC 2.0 消息格式 | 已完成 |
+| stdio 通信层 | 已完成 |
+| 连接管理 | 已完成 |
+| 消息处理 | 已完成 |
+| 工具调用机制 | 已完成 |
+| 会话管理 | 已完成 |
 
-### Agent 命令支持 ✅（Phase 5 已完成）
+### Agent 命令支持（Phase 5 已完成）
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| `/` 斜杠命令提示 | ✅ | 输入 `/` 显示可用命令 |
-| `@` 文件引用 | ✅ | 输入 `@` 选择文件/文件夹 |
-| 输入状态栏 | ✅ | 显示引用标签（位于输入框上方） |
+| `/` 斜杠命令提示 | 已完成 | 输入 `/` 显示可用命令 |
+| `@` 文件引用 | 已完成 | 输入 `@` 选择文件/文件夹 |
+| 输入状态栏 | 已完成 | 显示引用标签（位于输入框上方） |
 
-### UI-UX 优化 ✅（Phase 6 已完成）
+### UI-UX 优化（Phase 6 进行中）
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| LED 连接状态 | ✅ | 首次打开和切换 agent 时正确显示 |
-| 输入框快捷键 | ✅ | Enter 发送，Shift+Enter 换行 |
-| @ 文件自动附加 | ✅ | 选择后自动添加到输入状态栏 |
-| @current note 整合 | ✅ | 整合到 @ 菜单中 |
-| 快捷键冲突修复 | ✅ | 自动完成菜单打开时不触发发送 |
-| / 命令功能完善 | ✅ | /clear、/help 等命令可执行 |
-| / 命令测试脚本 | ✅ | 创建单元测试 |
-| **Agent Skills 支持** | ✅ | 从 agent 获取 skills，与内建命令合并显示 |
-| **移除 MockAdapter** | ✅ | 简化代码库，只保留 ACP Bridge |
-| 引用标签渲染 | ⏳ | @ 和 / 以引用块样式显示（待实现） |
+| LED 连接状态 | 待实现 | 首次打开和切换 agent 时正确显示 |
+| 输入框快捷键 | 待实现 | Enter 发送，Shift+Enter 换行 |
+| @ 文件自动附加 | 待实现 | 选择后自动添加到输入状态栏 |
+| @current note 整合 | 待实现 | 整合到 @ 菜单中 |
+| 快捷键冲突修复 | 待实现 | 自动完成菜单打开时不触发发送 |
+| / 命令功能完善 | 待实现 | /clear、/help 等命令可执行 |
+| / 命令测试脚本 | 待实现 | 创建单元测试 |
+| **ACP Slash Commands 动态支持** | 已完成 | `available_commands_update`、`input.hint`、Agent 命令插入与执行语义 |
+| **移除 MockAdapter** | 待实现 | 简化代码库，只保留 ACP Bridge |
+| 引用标签渲染 | 待实现 | @ 和 / 以引用块样式显示 |
+
+### ACP 协议能力补齐（2026-04-10 文档复核）
+| 功能 | 状态 | 说明 |
+|------|------|------|
+| Slash Commands 基础列表接收 | 部分完成 | 已能接收 `available_commands_update`，但 Agent 命令选择后的执行语义仍需修正 |
+| Slash Commands 动态更新 | 已完成 | 命令增删改可刷新当前自动完成菜单，并支持 `input.hint` |
+| Session Config Options UI | 已完成 | 工具栏按 Agent 提供配置渲染，并使用官方 SDK 请求更新 |
+| `config_option_update` 即时刷新 | 已完成 | adapter 更新后会通知 UI 重渲染工具栏 |
+| Session Modes 兼容回退 | 已完成 | `configOptions` 缺失时回退到 `modes`，并支持 `session/set_mode` |
+| `current_mode_update` 同步 | 已完成 | mode 变化会同步到工具栏和 plan 区域 |
+| Agent Plan 可视化 | 已完成 | 聊天面板增加 plan 展示区域 |
+| ACP 协议测试覆盖 | 已完成 | 已补对 4 类 session update 和设置请求的回归测试 |
 
 ---
 
@@ -158,11 +175,11 @@
 - 需要 Node.js child_process 能力
 
 ### 安全边界
-- ❌ 不伪装成其他客户端
-- ❌ 不绕过订阅限制
-- ✅ Agent 的 API key 由用户自己配置在本地
-- ✅ 文件操作需要用户确认（除非明确配置 autoConfirm）
-- ✅ 终端命令执行需要用户确认
+- 不伪装成其他客户端
+- 不绕过订阅限制
+- Agent 的 API key 由用户自己配置在本地
+- 文件操作需要用户确认（除非明确配置 autoConfirm）
+- 终端命令执行需要用户确认
 
 ---
 

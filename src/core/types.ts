@@ -65,8 +65,7 @@ export interface ConfigOptionValue {
 	description?: string;
 }
 
-/** Config option definition from ACP Agent */
-export interface ConfigOption {
+export interface ConfigOptionSelect {
 	id: string;
 	name: string;
 	description?: string;
@@ -74,6 +73,39 @@ export interface ConfigOption {
 	type: 'select';
 	currentValue: string;
 	options: ConfigOptionValue[];
+}
+
+export interface ConfigOptionBoolean {
+	id: string;
+	name: string;
+	description?: string;
+	category?: ConfigOptionCategory;
+	type: 'boolean';
+	currentValue: boolean;
+}
+
+/** Config option definition from ACP Agent */
+export type ConfigOption = ConfigOptionSelect | ConfigOptionBoolean;
+
+/** ACP slash command advertised by the agent */
+export interface AvailableCommand {
+	name: string;
+	description: string;
+	input?: { hint: string } | null;
+}
+
+/** ACP agent plan entry */
+export interface PlanEntry {
+	content: string;
+	priority: 'high' | 'medium' | 'low';
+	status: 'pending' | 'in_progress' | 'completed';
+}
+
+/** ACP session mode advertised by the agent */
+export interface SessionModeOption {
+	id: string;
+	name: string;
+	description?: string;
 }
 
 /** Session configuration state */
@@ -440,7 +472,15 @@ export interface AgentAdapter {
 	/** Get configuration options from the agent (ACP configOptions). Returns empty array if not supported. */
 	getConfigOptions?(): ConfigOption[];
 	/** Set a configuration option value. Returns updated configOptions on success. */
-	setConfigOption?(configId: string, value: string): Promise<ConfigOption[]>;
+	setConfigOption?(configId: string, value: string | boolean): Promise<ConfigOption[]>;
+	/** Get ACP slash commands advertised by the agent. */
+	getAvailableCommands?(): AvailableCommand[];
+	/** Get the current ACP plan, if available. */
+	getPlan?(): PlanEntry[];
+	/** Get the current ACP session mode, if available. */
+	getCurrentMode?(): string | null;
+	/** Get ACP session modes advertised by the agent. */
+	getSessionModes?(): SessionModeOption[];
 	
 	/** 
 	 * Get available skills from the agent.
