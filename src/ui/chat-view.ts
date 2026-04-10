@@ -10,7 +10,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, ConfigOptionValue } from '../core/types';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, ConfigOptionValue, BUILTIN_COMMANDS, Skill } from '../core/types';
 import { h, render } from 'preact';
 import { ConfigToolbar } from './components/config-toolbar';
 import { CancellationError } from '../core/errors';
@@ -21,7 +21,7 @@ import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '
 import { SessionManager, SessionMetadata } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
 import { InputStateBar } from './components/input-state-bar';
-import { InputAutocomplete, createSlashCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger } from './components/input-autocomplete';
+import { InputAutocomplete, createSlashCommandSuggestions, createSkillSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger } from './components/input-autocomplete';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -1455,7 +1455,7 @@ export class ChatView extends ItemView {
 			item.style.cursor = 'pointer';
 
 			const icon = item.createEl('span');
-			icon.innerHTML = backend.type === 'mock' ? '🧪' : '🤖';
+			icon.innerHTML = '🤖';
 			icon.style.fontSize = '0.8rem';
 
 			const name = item.createEl('span', { text: backend.name });
@@ -1956,12 +1956,22 @@ export class ChatView extends ItemView {
 
 		this.isAutocompleteOpen = true;
 		
-		let suggestions: Array<{ id: string; label: string; description?: string; icon?: string; data?: unknown }> = [];
+		let suggestions: Array<{ id: string; label: string; description?: string; icon?: string; data?: unknown; source?: 'builtin' | 'agent' }> = [];
 
 		if (trigger === 'slash') {
-			suggestions = createSlashCommandSuggestions().filter(s =>
+			// Get builtin commands
+			const builtinSuggestions = createSlashCommandSuggestions().filter(s =>
 				s.label.toLowerCase().includes(query.toLowerCase())
 			);
+			
+			// Get agent skills from adapter
+			const agentSkills = this.adapter?.getSkills?.() || [];
+			const agentSuggestions = createSkillSuggestions(agentSkills).filter(s =>
+				s.label.toLowerCase().includes(query.toLowerCase())
+			);
+			
+			// Combine: builtin first, then agent
+			suggestions = [...builtinSuggestions, ...agentSuggestions];
 		} else if (trigger === 'mention') {
 			const activeFile = this.app.workspace.getActiveFile();
 			const files = this.contextService.searchFiles(query, 10);
@@ -2044,9 +2054,15 @@ export class ChatView extends ItemView {
 
 		let newText = '';
 		if (trigger === 'slash') {
-			// Replace /command with the command
+			// Execute slash command
 			const lastSlash = textBeforeCursor.lastIndexOf('/');
-			newText = textBeforeCursor.substring(0, lastSlash) + item.label + ' ' + textAfterCursor;
+			const commandId = item.id;
+			
+			// Execute the command
+			await this.executeSlashCommand(commandId);
+			
+			// Remove the slash trigger text from input
+			newText = textBeforeCursor.substring(0, lastSlash) + textAfterCursor;
 		} else if (trigger === 'mention') {
 			// Handle file/folder mention: attach as file and update input
 			const lastAt = textBeforeCursor.lastIndexOf('@');
@@ -2190,6 +2206,66 @@ export class ChatView extends ItemView {
 			new Notice(`Attached selection (${attachment.size} bytes)`);
 			this.renderInputStateBar();
 		}
+	}
+
+	/** Execute slash command */
+	private async executeSlashCommand(commandId: string): Promise<void> {
+		switch (commandId) {
+			case 'clear':
+				this.clearConversation();
+				new Notice('Conversation cleared');
+				break;
+				
+			case 'help':
+				this.showHelpMessage();
+				break;
+				
+			case 'test':
+				// Send a test message to agent
+				this.inputEl.value = 'Run project tests';
+				await this.handleSend();
+				break;
+				
+			case 'web':
+				// Prepare web search prompt
+				this.inputEl.value = 'Search the web for: ';
+				this.inputEl.focus();
+				// Place cursor at the end
+				this.inputEl.setSelectionRange(this.inputEl.value.length, this.inputEl.value.length);
+				break;
+				
+			default:
+				console.warn('[ChatView] Unknown slash command:', commandId);
+				new Notice(`Unknown command: /${commandId}`);
+		}
+	}
+
+	/** Show help message */
+	private showHelpMessage(): void {
+		const helpText = `## Available Commands
+
+**Slash Commands:**
+- **/clear** - Clear current conversation
+- **/help** - Show this help message
+- **/test** - Run project tests
+- **/web** - Search web for information
+
+**Shortcuts:**
+- **Enter** - Send message
+- **Shift+Enter** - New line
+- **Ctrl+Enter** - New line
+
+**Mentions:**
+- **@** - Reference a file or folder
+- **#** - Reference a topic
+
+**Tips:**
+- Use @ to attach files as context
+- Use # to reference previous conversation topics
+- Clear conversation anytime with /clear`;
+
+		const msg = this.session.addMessage('assistant', helpText);
+		this.renderMessage(msg);
 	}
 
 	/** Handle attach current note button click */

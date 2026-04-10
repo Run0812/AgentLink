@@ -12,13 +12,11 @@ import {
 	DEFAULT_SETTINGS,
 	getActiveBackendConfig,
 	findBackendConfig,
-	createMockBackendConfig,
 	createKimiBackendConfig,
 } from './settings/settings';
 import { fetchAcpRegistry, saveLocalAcpRegistry } from './settings/registry-utils';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
-import { MockAdapter } from './adapters/mock-adapter';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
 import { SessionManager } from './services/session-manager';
 
@@ -29,7 +27,7 @@ export default class AgentLinkPlugin extends Plugin {
 
 	// ── Lifecycle ──────────────────────────────────────────────────────
 
-async onload(): Promise<void> {
+	async onload(): Promise<void> {
 		await this.loadSettings();
 		
 		// Initialize SessionManager
@@ -120,8 +118,8 @@ async onload(): Promise<void> {
 
 		// Migration: ensure we always have at least one backend
 		if (!this.settings.backends || this.settings.backends.length === 0) {
-			this.settings.backends = [createMockBackendConfig()];
-			this.settings.activeBackendId = 'mock-default';
+			// No backends configured - user needs to add one via settings
+			logger.warn('AgentLink: No backends configured. Please add an ACP agent in settings.');
 		}
 
 		// Migration: migrate old ACP bridge configs to new format
@@ -141,10 +139,6 @@ async onload(): Promise<void> {
 			}
 			return backend;
 		});
-
-		// Migration: add preset backends if missing
-		// Commented out: don't auto-add presets on startup, let users manually add them
-		// this.ensurePresetBackends();
 
 		// Ensure active backend exists
 		const activeExists = this.settings.backends.some(
@@ -260,32 +254,28 @@ async onload(): Promise<void> {
 
 		const backendConfig = getActiveBackendConfig(this.settings);
 		if (!backendConfig) {
-			logger.warn('AgentLink: No active backend configured, falling back to mock');
-			this.adapter = new MockAdapter();
+			logger.warn('AgentLink: No active backend configured. Please add an ACP agent in settings.');
+			this.adapter = null;
 			return;
 		}
 
 		logger.info('AgentLink: building adapter for', backendConfig.type, backendConfig.id);
 
 		switch (backendConfig.type) {
-			case 'mock':
-				this.adapter = new MockAdapter();
+			case 'acp-bridge': {
+				const cfg: AcpBridgeAdapterConfig = {
+					...backendConfig,
+					app: this.app,
+				};
+				this.adapter = new AcpBridgeAdapter(cfg);
 				break;
+			}
 
-		case 'acp-bridge': {
-			const cfg: AcpBridgeAdapterConfig = {
-				...backendConfig,
-				app: this.app,
-			};
-			this.adapter = new AcpBridgeAdapter(cfg);
-			break;
+			default:
+				logger.warn(`AgentLink: unsupported backend type`);
+				this.adapter = null;
+				break;
 		}
-
-		default:
-			logger.warn(`AgentLink: unsupported backend type, falling back to mock`);
-			this.adapter = new MockAdapter();
-			break;
-	}
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

@@ -21,6 +21,7 @@ import {
 	ToolResult,
 	ConfigOption,
 	AcpBridgeBackendConfig,
+	Skill,
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
@@ -455,6 +456,21 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			return this.serverCapabilities;
 		}
 		return ['chat', 'file_read', 'file_write', 'file_edit', 'terminal'];
+	}
+
+	// ── Skills (ACP Skills) ────────────────────────────────────────────────
+
+	/**
+	 * Get available skills from the ACP agent.
+	 * Currently returns empty array as skills need to be fetched from the agent.
+	 * TODO: Implement actual skill fetching from ACP protocol.
+	 */
+	getSkills(): Skill[] {
+		// In the future, this should fetch skills from the ACP agent
+		// via the connection. For now, return empty array as ACP SDK
+		// doesn't have a direct skills endpoint yet.
+		console.log('[ACP Adapter] getSkills called (not implemented - waiting for ACP spec)');
+		return [];
 	}
 
 	// ── Config Options (ACP Session Config Options) ────────────────────────

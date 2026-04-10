@@ -1,14 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMockBackendConfig, createKimiBackendConfig, createAcpBridgeBackendConfig, isValidBackendId, generateBackendId } from '../../src/settings/settings';
-
-describe('createMockBackendConfig', () => {
-	it('creates a mock backend with default values', () => {
-		const config = createMockBackendConfig();
-		expect(config.type).toBe('mock');
-		expect(config.id).toBe('mock-default');
-		expect(config.name).toBe('Mock Agent (Test)');
-	});
-});
+import { createKimiBackendConfig, createAcpBridgeBackendConfig, isValidBackendId, generateBackendId } from '../../src/settings/settings';
 
 describe('createKimiBackendConfig', () => {
 	it('creates Kimi backend with correct command and args', () => {
@@ -62,10 +53,5 @@ describe('generateBackendId', () => {
 	it('generates acp-bridge ID with prefix', () => {
 		const id = generateBackendId('acp-bridge');
 		expect(id).toMatch(/^acp-\d+/);
-	});
-
-	it('generates mock ID with default prefix', () => {
-		const id = generateBackendId('mock');
-		expect(id).toMatch(/^backend-\d+/);
 	});
 });

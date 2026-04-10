@@ -1,8 +1,11 @@
 import { h, FunctionComponent } from 'preact';
-import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
 import type { TFile, TFolder } from 'obsidian';
+import type { Skill } from '../../core/types';
 
 export type AutocompleteTrigger = 'slash' | 'mention' | 'topic' | null;
+
+type SuggestionSource = 'builtin' | 'agent';
 
 interface SuggestionItem {
 	id: string;
@@ -10,6 +13,7 @@ interface SuggestionItem {
 	description?: string;
 	icon?: string;
 	data?: unknown;
+	source?: SuggestionSource;
 }
 
 interface InputAutocompleteProps {
@@ -40,49 +44,6 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const containerRef = useRef<HTMLDivElement>(null);
 
-	// 重置选中索引当建议列表变化时
-	useEffect(() => {
-		setSelectedIndex(0);
-	}, [suggestions.length]);
-
-	// 键盘导航
-	const handleKeyDown = useCallback(async (e: KeyboardEvent) => {
-		switch (e.key) {
-			case 'ArrowDown':
-				e.preventDefault();
-				setSelectedIndex(prev => 
-					prev < suggestions.length - 1 ? prev + 1 : prev
-				);
-				break;
-			case 'ArrowUp':
-				e.preventDefault();
-				setSelectedIndex(prev => prev > 0 ? prev - 1 : 0);
-				break;
-			case 'Enter':
-				e.preventDefault();
-				if (suggestions[selectedIndex]) {
-					await onSelect(suggestions[selectedIndex]);
-				}
-				break;
-			case 'Escape':
-				e.preventDefault();
-				onClose();
-				break;
-			case 'Tab':
-				e.preventDefault();
-				if (suggestions[selectedIndex]) {
-					await onSelect(suggestions[selectedIndex]);
-				}
-				break;
-		}
-	}, [suggestions, selectedIndex, onSelect, onClose]);
-
-	// 添加全局键盘监听
-	useEffect(() => {
-		document.addEventListener('keydown', handleKeyDown);
-		return () => document.removeEventListener('keydown', handleKeyDown);
-	}, [handleKeyDown]);
-
 	// 点击外部关闭
 	useEffect(() => {
 		const handleClickOutside = (e: MouseEvent) => {
@@ -107,6 +68,64 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 			default: return '';
 		}
 	};
+
+	// Group suggestions by source for slash commands
+	const groupedItems = useMemo(() => groupSuggestionsBySource(suggestions, trigger), [suggestions, trigger]);
+
+	// Map grouped items to flat list for keyboard navigation (only items, not headers)
+	const navigableItems = useMemo(() => 
+		groupedItems.filter((item): item is { type: 'item'; content: SuggestionItem; originalIndex: number } => 
+			item.type === 'item'
+		),
+		[groupedItems]
+	);
+
+	// Handle selection with proper index mapping
+	const handleSelect = useCallback(async (navigableIndex: number) => {
+		const item = navigableItems[navigableIndex];
+		if (item) {
+			await onSelect(item.content);
+		}
+	}, [navigableItems, onSelect]);
+
+	// Adjust keyboard navigation for grouped items
+	const handleKeyDown = useCallback(async (e: KeyboardEvent) => {
+		switch (e.key) {
+			case 'ArrowDown':
+				e.preventDefault();
+				setSelectedIndex(prev => 
+					prev < navigableItems.length - 1 ? prev + 1 : prev
+				);
+				break;
+			case 'ArrowUp':
+				e.preventDefault();
+				setSelectedIndex(prev => prev > 0 ? prev - 1 : 0);
+				break;
+			case 'Enter':
+				e.preventDefault();
+				await handleSelect(selectedIndex);
+				break;
+			case 'Escape':
+				e.preventDefault();
+				onClose();
+				break;
+			case 'Tab':
+				e.preventDefault();
+				await handleSelect(selectedIndex);
+				break;
+		}
+	}, [navigableItems, selectedIndex, handleSelect, onClose]);
+
+	// Reset selected index when suggestions change
+	useEffect(() => {
+		setSelectedIndex(0);
+	}, [suggestions.length]);
+
+	// Add global keyboard listener
+	useEffect(() => {
+		document.addEventListener('keydown', handleKeyDown);
+		return () => document.removeEventListener('keydown', handleKeyDown);
+	}, [handleKeyDown]);
 
 	return (
 		<div 
@@ -149,76 +168,120 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 					overflowY: 'auto',
 				}}
 			>
-				{suggestions.map((item, index) => (
-					<div
-						key={item.id}
-						className={`agentlink-autocomplete-item ${index === selectedIndex ? 'is-selected' : ''}`}
-						onClick={async () => await onSelect(item)}
-						onMouseEnter={() => setSelectedIndex(index)}
-						style={{
-							padding: '5px 10px',
-							cursor: 'pointer',
-							borderBottom: '1px solid var(--background-modifier-border-hover)',
-							background: index === selectedIndex ? 'var(--background-modifier-hover)' : 'transparent',
-							display: 'flex',
-							alignItems: 'center',
-							gap: '6px',
-						}}
-					>
-						{/* 图标 */}
-						{item.icon && (
-							<span 
-								className="agentlink-autocomplete-icon"
+				{groupedItems.map((groupedItem, groupIndex) => {
+					if (groupedItem.type === 'header') {
+						return (
+							<div
+								key={`header-${groupIndex}`}
+								className="agentlink-autocomplete-group-header"
 								style={{
-									width: '14px',
-									textAlign: 'center',
+									padding: '4px 10px',
+									background: 'var(--background-secondary)',
 									color: 'var(--text-muted)',
 									fontSize: '10px',
-									flexShrink: 0,
+									fontWeight: 600,
+									textTransform: 'uppercase',
+									letterSpacing: '0.5px',
+									borderBottom: '1px solid var(--background-modifier-border)',
 								}}
 							>
-								{item.icon}
-							</span>
-						)}
-						<div 
-							className="agentlink-autocomplete-content"
+								{groupedItem.content}
+							</div>
+						);
+					}
+
+					const item = groupedItem.content as SuggestionItem;
+					const navigableIndex = groupedItem.originalIndex ?? 0;
+					const isSelected = navigableIndex === selectedIndex;
+					const isAgent = item.source === 'agent';
+
+					return (
+						<div
+							key={item.id}
+							className={`agentlink-autocomplete-item ${isSelected ? 'is-selected' : ''}`}
+							onClick={async () => await handleSelect(navigableIndex)}
+							onMouseEnter={() => setSelectedIndex(navigableIndex)}
 							style={{
-								flex: 1,
-								minWidth: 0,
-								overflow: 'hidden',
+								padding: '5px 10px',
+								cursor: 'pointer',
+								borderBottom: '1px solid var(--background-modifier-border-hover)',
+								background: isSelected ? 'var(--background-modifier-hover)' : 'transparent',
+								display: 'flex',
+								alignItems: 'center',
+								gap: '6px',
 							}}
 						>
+							{/* 图标 */}
+							{item.icon && (
+								<span 
+									className="agentlink-autocomplete-icon"
+									style={{
+										width: '14px',
+										textAlign: 'center',
+										color: isAgent ? 'var(--text-accent)' : 'var(--text-muted)',
+										fontSize: '10px',
+										flexShrink: 0,
+									}}
+								>
+									{item.icon}
+								</span>
+							)}
 							<div 
-								className="agentlink-autocomplete-label"
+								className="agentlink-autocomplete-content"
 								style={{
-									fontWeight: 500,
-									color: 'var(--text-normal)',
-									fontSize: '12px',
-									whiteSpace: 'nowrap',
+									flex: 1,
+									minWidth: 0,
 									overflow: 'hidden',
-									textOverflow: 'ellipsis',
 								}}
 							>
-								{item.label}
-							</div>
-							{item.description && (
 								<div 
-									className="agentlink-autocomplete-description"
+									className="agentlink-autocomplete-label"
 									style={{
-										fontSize: '10px',
-										color: 'var(--text-muted)',
+										fontWeight: isAgent ? 500 : 600,
+										color: isAgent ? 'var(--text-normal)' : 'var(--text-muted)',
+										fontSize: '12px',
 										whiteSpace: 'nowrap',
 										overflow: 'hidden',
 										textOverflow: 'ellipsis',
-										marginTop: '1px',
 									}}
 								>
-									{item.description}
+									{item.label}
 								</div>
+								{item.description && (
+									<div 
+										className="agentlink-autocomplete-description"
+										style={{
+											fontSize: '10px',
+											color: 'var(--text-muted)',
+											whiteSpace: 'nowrap',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											marginTop: '1px',
+										}}
+									>
+										{item.description}
+									</div>
+								)}
+							</div>
+							{/* Source badge for slash commands */}
+							{trigger === 'slash' && item.source && (
+								<span
+									className="agentlink-autocomplete-badge"
+									style={{
+										fontSize: '9px',
+										padding: '1px 4px',
+										borderRadius: '3px',
+										background: isAgent ? 'var(--interactive-accent)' : 'var(--background-modifier-border)',
+										color: isAgent ? 'var(--text-on-accent)' : 'var(--text-muted)',
+										flexShrink: 0,
+									}}
+								>
+									{isAgent ? 'Agent' : 'Builtin'}
+								</span>
 							)}
 						</div>
-					</div>
-				))}
+					);
+				})}
 			</div>
 			
 			{/* 紧凑底部提示 */}
@@ -242,6 +305,54 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 };
 
 /**
+ * Group suggestions by source for slash commands
+ * Returns grouped items with headers interspersed
+ */
+function groupSuggestionsBySource(
+	suggestions: SuggestionItem[],
+	trigger: AutocompleteTrigger
+): { type: 'item' | 'header'; content: SuggestionItem | string; originalIndex?: number }[] {
+	if (trigger !== 'slash') {
+		// For non-slash triggers, just return items without grouping
+		return suggestions.map((item, index) => ({ type: 'item', content: item, originalIndex: index }));
+	}
+
+	// Separate builtin and agent items
+	const builtinItems: SuggestionItem[] = [];
+	const agentItems: SuggestionItem[] = [];
+
+	for (const item of suggestions) {
+		if (item.source === 'agent') {
+			agentItems.push(item);
+		} else {
+			// Default to builtin if no source specified
+			builtinItems.push(item);
+		}
+	}
+
+	const result: { type: 'item' | 'header'; content: SuggestionItem | string; originalIndex?: number }[] = [];
+	let currentIndex = 0;
+
+	// Add builtin section if there are builtin items
+	if (builtinItems.length > 0) {
+		result.push({ type: 'header', content: 'Built-in' });
+		for (const item of builtinItems) {
+			result.push({ type: 'item', content: item, originalIndex: currentIndex++ });
+		}
+	}
+
+	// Add agent section if there are agent items
+	if (agentItems.length > 0) {
+		result.push({ type: 'header', content: 'Agent' });
+		for (const item of agentItems) {
+			result.push({ type: 'item', content: item, originalIndex: currentIndex++ });
+		}
+	}
+
+	return result;
+}
+
+/**
  * 创建斜杠命令建议项（紧凑版）
  */
 export function createSlashCommandSuggestions(): SuggestionItem[] {
@@ -251,26 +362,44 @@ export function createSlashCommandSuggestions(): SuggestionItem[] {
 			label: '/web',
 			description: 'Search web for information',
 			icon: '/',
+			source: 'builtin',
 		},
 		{
 			id: 'test',
 			label: '/test',
 			description: 'Run project tests',
 			icon: '/',
+			source: 'builtin',
 		},
 		{
 			id: 'clear',
 			label: '/clear',
 			description: 'Clear conversation',
 			icon: '/',
+			source: 'builtin',
 		},
 		{
 			id: 'help',
 			label: '/help',
 			description: 'Show help',
 			icon: '/',
+			source: 'builtin',
 		},
 	];
+}
+
+/**
+ * Create suggestions from Skill objects (from ACP agent)
+ */
+export function createSkillSuggestions(skills: Skill[]): SuggestionItem[] {
+	return skills.map(skill => ({
+		id: skill.id,
+		label: skill.label,
+		description: skill.description,
+		icon: skill.icon || '⚡',
+		source: skill.source,
+		data: skill,
+	}));
 }
 
 /**

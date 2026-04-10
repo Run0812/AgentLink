@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice, ToggleComponent } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
-import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, createMockBackendConfig, mergeAcpRegistryIntoSettings } from './settings';
+import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, mergeAcpRegistryIntoSettings } from './settings';
 import { fetchAcpRegistry } from './registry-utils';
 import { AcpAgentEditorModal } from './acp-agent-editor';
 import { LocalAgentScanModal } from './local-agent-scanner';
@@ -85,19 +85,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.onClick(() => {
 				this.openAddBackendModal('acp-bridge');
 			});
-
-		// Add Mock button (if not exists)
-		const hasMock = this.plugin.settings.backends.some(b => b.type === 'mock');
-		if (!hasMock) {
-			new ButtonComponent(addBtnContainer)
-				.setButtonText('+ Mock')
-				.onClick(async () => {
-					const mockConfig = createMockBackendConfig();
-					this.plugin.settings.backends.push(mockConfig);
-					await this.plugin.saveSettings();
-					this.display();
-				});
-		}
 
 		// Import/Export buttons
 		const importExportContainer = containerEl.createDiv();
@@ -534,9 +521,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			if (type === 'acp-bridge') {
 				newBackend = createAcpBridgeBackendConfig(id, name);
 			} else {
-				newBackend = createMockBackendConfig();
-				newBackend.id = id;
-				newBackend.name = name;
+				throw new Error(`Unsupported backend type: ${type}`);
 			}
 
 			this.plugin.settings.backends.push(newBackend);

@@ -47,15 +47,6 @@ export interface AgentLinkSettings {
   thinkingMode: 'none' | 'quick' | 'balanced' | 'deep';
 }
 
-/** Create a default Mock backend config */
-export function createMockBackendConfig(): AgentBackendConfig {
-	return {
-		type: 'mock',
-		id: 'mock-default',
-		name: 'Mock Agent (Test)',
-	};
-}
-
 /** Create preset Kimi Code backend config */
 export function createKimiBackendConfig(): AgentBackendConfig {
 	return {
@@ -87,10 +78,8 @@ export function createAcpBridgeBackendConfig(
 }
 
 export const DEFAULT_SETTINGS: AgentLinkSettings = {
-  activeBackendId: 'mock-default',
-  backends: [
-    createMockBackendConfig(),
-  ],
+  activeBackendId: '',
+  backends: [],
   // ── Registry settings ────────────────────────────────────────
   enableAcpRegistrySync: true,
   lastAcpRegistrySync: null,
@@ -126,8 +115,6 @@ export function getActiveBackendConfig(settings: AgentLinkSettings): AgentBacken
  */
 export function getBackendTypeLabel(type: BackendType): string {
 	switch (type) {
-		case 'mock':
-			return 'Mock Agent';
 		case 'acp-bridge':
 			return 'ACP Bridge';
 		default:
@@ -146,7 +133,7 @@ export function isValidBackendId(id: string): boolean {
  * Generate a unique backend ID.
  */
 export function generateBackendId(type: BackendType): string {
-  const prefix = type === 'acp-bridge' ? 'acp' : 'backend';
+  const prefix = 'acp';
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 

@@ -29,13 +29,16 @@ export type {
 	BackendType,
 	AgentBackendConfig,
 	AcpBridgeBackendConfig,
-	MockBackendConfig,
 	BackendSummary,
+	// Skill types
+	Skill,
+	SkillParameter,
 } from '../core/types';
 
 export {
 	ALL_CAPABILITIES,
 	CAPABILITY_LABELS,
 	TOOL_METADATA,
+	BUILTIN_COMMANDS,
 	generateToolCallId,
 } from '../core/types';

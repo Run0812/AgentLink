@@ -5,7 +5,7 @@
 // ── Backend types ──────────────────────────────────────────────────────
 
 /** Backend implementation types */
-export type BackendType = 'mock' | 'acp-bridge';
+export type BackendType = 'acp-bridge';
 
 /** Configuration for an ACP Bridge backend */
 export interface AcpBridgeBackendConfig {
@@ -42,22 +42,8 @@ export interface AcpBridgeBackendConfig {
 	enabled?: boolean;
 }
 
-/** Configuration for Mock backend */
-export interface MockBackendConfig {
-	type: 'mock';
-	/** Unique identifier */
-	id: string;
-	/** Display name */
-	name: string;
-	/**
-	 * Whether this backend is enabled (shown in sidebar dropdown).
-	 * Disabled backends are not selectable in the chat view.
-	 */
-	enabled?: boolean;
-}
-
 /** Union type for all backend configurations */
-export type AgentBackendConfig = AcpBridgeBackendConfig | MockBackendConfig;
+export type AgentBackendConfig = AcpBridgeBackendConfig;
 
 /** Backend summary for UI display */
 export interface BackendSummary {
@@ -362,6 +348,65 @@ export interface AgentSession {
 	activeBackendId?: string;
 }
 
+// ── Skill Types ─────────────────────────────────────────────────────────
+
+/**
+ * Skill definition from ACP Agent or built-in command.
+ * Skills are agent capabilities that can be invoked via slash commands.
+ */
+export interface Skill {
+	/** Unique identifier for the skill */
+	id: string;
+	/** Display name (shown in command palette) */
+	name: string;
+	/** Command label shown in the UI (e.g., "/web-search") */
+	label: string;
+	/** Description of what the skill does */
+	description: string;
+	/** Category for grouping (e.g., "search", "code", "file") */
+	category?: string;
+	/** Whether this is a built-in command or from the agent */
+	source: 'builtin' | 'agent';
+	/** Icon to display (emoji or text) */
+	icon?: string;
+	/** Optional parameters the skill accepts */
+	parameters?: SkillParameter[];
+}
+
+/** Skill parameter definition */
+export interface SkillParameter {
+	name: string;
+	type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+	required: boolean;
+	description?: string;
+	default?: unknown;
+}
+
+/**
+ * Built-in slash commands provided by the plugin itself.
+ * These are always available regardless of the connected agent.
+ */
+export const BUILTIN_COMMANDS: Skill[] = [
+	{
+		id: 'clear',
+		name: 'Clear conversation',
+		label: '/clear',
+		description: 'Clear current conversation history',
+		source: 'builtin',
+		icon: '🗑️',
+		category: 'system',
+	},
+	{
+		id: 'help',
+		name: 'Show help',
+		label: '/help',
+		description: 'Show available commands and shortcuts',
+		source: 'builtin',
+		icon: '❓',
+		category: 'system',
+	},
+];
+
 // ── The unified adapter interface ──────────────────────────────────────
 
 /**
@@ -396,6 +441,13 @@ export interface AgentAdapter {
 	getConfigOptions?(): ConfigOption[];
 	/** Set a configuration option value. Returns updated configOptions on success. */
 	setConfigOption?(configId: string, value: string): Promise<ConfigOption[]>;
+	
+	/** 
+	 * Get available skills from the agent.
+	 * Returns empty array if the agent doesn't support skills or if not connected.
+	 * Skills are merged with built-in commands in the UI.
+	 */
+	getSkills?(): Skill[];
 }
 
 // ── Utility ────────────────────────────────────────────────────────────

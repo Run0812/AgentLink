@@ -19,7 +19,326 @@
 | Phase 3 - ACP Bridge Mode | ✅ 已完成 | 100% |
 | Phase 4 - 历史对话保存功能 | ✅ 已完成 | 100% |
 | Phase 5 - agent命令支持 | ✅ 已完成 | 100% |
-| Phase 6 - UI-UX 优化 | 🟡 进行中 | 60% |
+| Phase 6 - UI-UX 优化 | ✅ 已完成 | 95% |
+
+---
+
+## 2026-04-10 - 移除 MockAdapter ✅
+
+**操作**: 移除 MockAdapter 及相关代码
+
+### 移除原因
+- ACP 协议目前不支持 skills/commands 的传输
+- MockAdapter 主要用于测试，现在不再需要
+- 简化代码库，只保留 ACP Bridge Adapter
+
+### 移除的文件
+- ✅ `src/adapters/mock-adapter.ts` - 已删除
+- ✅ `test/unit/mock-adapter.test.ts` - 已删除
+
+### 修改的文件
+- ✅ `src/main.ts` - 移除 MockAdapter 导入和使用
+- ✅ `src/core/types.ts` - 移除 `mock` BackendType 和 `MockBackendConfig`
+- ✅ `src/settings/settings.ts` - 移除 `createMockBackendConfig()` 函数
+- ✅ `src/settings/settings-tab.ts` - 移除 Mock 按钮和相关逻辑
+- ✅ `src/ui/chat-view.ts` - 移除 mock 类型判断
+- ✅ `test/unit/settings.test.ts` - 移除 mock 相关测试
+- ✅ `src/adapters/agent-adapter.ts` - 移除 MockBackendConfig 导出
+
+### 构建产物
+
+```
+build/
+├── main.js       (850.8 KB) - 移除 MockAdapter 后更小
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 测试结果
+
+```
+Test Files  9 passed (9)
+     Tests  68 passed (68)
+```
+
+### 影响
+
+- 插件现在**只支持 ACP Bridge** 后端
+- 用户需要配置 ACP agent 才能使用
+- `/` 命令现在只显示内建命令（/clear、/help）
+- 等待 ACP 协议支持 skills 后，可恢复 agent skills 功能
+
+---
+
+## 2026-04-10 - Agent Skills 功能发布到 dev 测试 ✅
+
+**操作**: 将 Agent Skills 功能构建产物发布到 dev vault 进行测试
+
+### 构建产物
+
+```
+build/
+├── main.js       (867.6 KB) - 包含 Agent Skills 支持
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 发布位置
+
+复制到: `dev/.obsidian/plugins/agentlink/`
+
+**文件清单**:
+- ✅ main.js (867.62 KB) - 包含内建命令 + Agent Skills 合并功能
+- ✅ manifest.json (0.33 KB) - 插件清单
+- ✅ styles.css (11.30 KB) - 样式文件
+- ✅ data.json (3.23 KB) - 用户数据（保留）
+
+### 测试步骤
+
+1. 打开 Obsidian
+2. 打开 `dev/` 文件夹作为 vault
+3. 进入设置 → 社区插件 → 启用 AgentLink
+4. **测试 Mock Adapter**:
+   - 选择 Mock Agent
+   - 在输入框中输入 `/`
+   - 验证显示内容：
+     - **Built-in**: /clear (🗑️), /help (❓)
+     - **Agent**: /web-search (🌐), /code-analysis (🔍), /run-tests (🧪)
+   - 验证分组显示（Built-in 在上，Agent 在下）
+   - 选择 /clear → 对话应被清空
+   - 选择 /help → 应显示帮助信息
+   - 选择 /web-search → 应发送消息给 agent
+
+5. **测试 ACP Bridge Adapter**（如果已配置）:
+   - 选择 ACP Agent
+   - 输入 `/`
+   - 应只看到 Built-in 命令（/clear, /help）
+   - 等待 ACP 协议完善后会显示 Agent skills
+
+### 预期行为
+
+| 操作 | 预期结果 |
+|------|----------|
+| 输入 `/` | 显示命令列表，分 Built-in 和 Agent 两组 |
+| 选择 Built-in 命令 | 本地执行（不发送给 agent） |
+| 选择 Agent skill | 发送给 agent 处理 |
+| 命令过滤 | 输入 `/cl` 应过滤出 /clear |
+| Enter 选择 | 在菜单打开时，Enter 应选择命令而非发送消息 |
+
+### 功能验证
+
+- ✅ 构建成功（无错误）
+- ✅ 测试通过（78/78）
+- ✅ 文件已复制到 dev 目录
+- ✅ 准备进行集成测试
+
+---
+
+## 2026-04-10 - 完整实现：从 Agent 获取 Skills + 内建命令 ✅
+
+**目标**: 实现从 ACP Agent 获取 skills，与内建命令合并显示，并区分来源
+
+**状态**: ✅ **已完成**
+
+### 实现内容
+
+#### 1. Skill 类型定义 ✅
+**文件**: `src/core/types.ts`
+
+**添加内容**:
+- `Skill` 接口：定义 skill 结构（id, name, label, description, category, source, icon, parameters）
+- `SkillParameter` 接口：skill 参数定义
+- `BUILTIN_COMMANDS` 常量：内建命令列表（/clear, /help）
+
+#### 2. AgentAdapter 接口扩展 ✅
+**文件**: `src/core/types.ts`
+
+**添加方法**:
+```typescript
+getSkills?(): Skill[];
+```
+
+#### 3. MockAdapter 实现 ✅
+**文件**: `src/adapters/mock-adapter.ts`
+
+**添加 mock skills**:
+- `/web-search` - 网页搜索
+- `/code-analysis` - 代码分析
+- `/run-tests` - 运行测试
+
+#### 4. AcpBridgeAdapter 实现 ✅
+**文件**: `src/adapters/acp-bridge-adapter.ts`
+
+**实现 getSkills()**: 返回空数组（等待 ACP 协议完整支持）
+
+#### 5. UI 组件更新 ✅
+**文件**: `src/ui/components/input-autocomplete.tsx`
+
+**更新内容**:
+- `SuggestionItem` 添加 `source` 字段（'builtin' | 'agent'）
+- 按 source 分组显示命令
+- **Built-in** 命令显示在顶部，带有 🗑️ ❓ 图标
+- **Agent** skills 显示在下部，带有 🌐 🔍 🧪 图标
+- 不同来源使用不同样式区分
+- 添加 `createSkillSuggestions()` 函数转换 Skill 到 SuggestionItem
+
+#### 6. ChatView 合并逻辑 ✅
+**文件**: `src/ui/chat-view.ts`
+
+**更新 `showAutocomplete()`**:
+```typescript
+// 获取内建命令
+const builtinSuggestions = createSlashCommandSuggestions()
+  .filter(s => s.label.toLowerCase().includes(query.toLowerCase()));
+
+// 获取 agent skills
+const agentSkills = this.adapter?.getSkills?.() || [];
+const agentSuggestions = createSkillSuggestions(agentSkills)
+  .filter(s => s.label.toLowerCase().includes(query.toLowerCase()));
+
+// 合并：内建命令在前，agent skills 在后
+suggestions = [...builtinSuggestions, ...agentSuggestions];
+```
+
+### 显示效果
+
+```
+┌──────────────────────────────────┐
+│ Commands                         │
+├──────────────────────────────────┤
+│ 🗑️ /clear    Clear conversation │ ← Built-in
+│ ❓ /help     Show help           │ ← Built-in
+├──────────────────────────────────┤
+│ 🌐 /web-search   Web Search      │ ← Agent
+│ 🔍 /code-analysis Code Analysis  │ ← Agent
+│ 🧪 /run-tests    Run Tests       │ ← Agent
+└──────────────────────────────────┘
+```
+
+### 文件变更
+
+**修改文件**:
+- `src/core/types.ts` - 添加 Skill 类型和 BUILTIN_COMMANDS
+- `src/adapters/agent-adapter.ts` - 导出 Skill 类型
+- `src/adapters/mock-adapter.ts` - 实现 getSkills()
+- `src/adapters/acp-bridge-adapter.ts` - 实现 getSkills()
+- `src/ui/components/input-autocomplete.tsx` - 分组显示、样式区分
+- `src/ui/chat-view.ts` - 合并内建命令和 agent skills
+
+### 构建产物
+
+```
+build/
+├── main.js       (867.6 KB)
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 测试步骤
+
+1. 使用 **Mock Adapter** 测试：
+   - 输入 `/` → 应看到内建命令 + Mock Agent 的 skills
+   - 内建命令在顶部（/clear, /help）
+   - Agent skills 在下部（/web-search, /code-analysis, /run-tests）
+
+2. 使用 **ACP Bridge Adapter** 测试：
+   - 输入 `/` → 应只看到内建命令（/clear, /help）
+   - 等待 ACP 协议完整支持后，agent 会提供 skills
+
+3. 验证命令执行：
+   - 选择内建命令 → 本地执行（清空对话/显示帮助）
+   - 选择 agent skill → 通过 sendMessage 发送给 agent
+
+---
+
+## 2026-04-10 - Task 6 完成：/ 命令功能验证与测试脚本 ✅
+
+**目标**: 实现 / 命令的执行逻辑并创建测试脚本
+
+**状态**: ✅ **已完成**
+
+### 实现内容
+
+#### 1. 命令执行逻辑 ✅
+**文件**: `src/ui/chat-view.ts`
+
+**添加方法**:
+- `executeSlashCommand(commandId: string)` - 执行斜杠命令
+- `showHelpMessage()` - 显示帮助信息
+
+**支持的命令**:
+| 命令 | 行为 |
+|------|------|
+| `/clear` | 清空当前对话并显示通知 |
+| `/help` | 在对话中显示帮助消息 |
+| `/test` | 设置输入框为 "Run project tests" 并发送 |
+| `/web` | 设置输入框为 "Search the web for: " 并聚焦 |
+
+**代码示例**:
+```typescript
+private async executeSlashCommand(commandId: string): Promise<void> {
+  switch (commandId) {
+    case 'clear':
+      this.clearConversation();
+      new Notice('Conversation cleared');
+      break;
+    case 'help':
+      this.showHelpMessage();
+      break;
+    case 'test':
+      this.inputEl.value = 'Run project tests';
+      await this.handleSend();
+      break;
+    case 'web':
+      this.inputEl.value = 'Search the web for: ';
+      this.inputEl.focus();
+      break;
+  }
+}
+```
+
+#### 2. 测试脚本 ✅
+**文件**: `test/unit/slash-commands.test.ts` (新增)
+
+**测试覆盖**:
+- ✅ `createSlashCommandSuggestions()` 返回所有命令
+- ✅ 命令结构正确（id, label, description, icon）
+- ✅ 命令 ID 唯一性
+- ✅ 描述有意义
+- ✅ 按 query 过滤命令
+- ✅ 大小写不敏感过滤
+- ✅ 无匹配时返回空数组
+
+**测试结果**:
+```
+Test Files  10 passed (10)
+     Tests  78 passed (78)
+```
+
+### 文件变更
+
+**修改文件**:
+- `src/ui/chat-view.ts` - 添加命令执行逻辑
+
+**新增文件**:
+- `test/unit/slash-commands.test.ts` - 单元测试
+
+### 构建产物
+
+```
+build/
+├── main.js       (861.9 KB)
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 测试步骤
+
+1. 在输入框中输入 `/` → 显示命令列表
+2. 选择 `/clear` → 对话被清空，显示通知
+3. 选择 `/help` → 显示帮助消息在对话中
+4. 选择 `/test` → 自动发送 "Run project tests"
+5. 选择 `/web` → 输入框显示 "Search the web for: "
 
 ---
 
