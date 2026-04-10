@@ -64,6 +64,35 @@ describe('AcpBridgeAdapter', () => {
 	});
 
 	describe('ACP session state', () => {
+		it('uses Obsidian vault base path as working directory when available', () => {
+			const adapterWithApp = new AcpBridgeAdapter({
+				...defaultConfig,
+				app: {
+					vault: {
+						adapter: {
+							getBasePath: () => 'D:\\vault-root',
+						},
+					},
+				} as never,
+			});
+
+			const internal = adapterWithApp as unknown as {
+				getWorkingDirectory: () => string;
+				buildWorkspaceFileUri: (relativePath: string) => string;
+			};
+
+			expect(internal.getWorkingDirectory()).toBe('D:\\vault-root');
+			expect(internal.buildWorkspaceFileUri('current.md')).toBe('file:///D:/vault-root/current.md');
+		});
+
+		it('falls back to process cwd when vault base path is unavailable', () => {
+			const internal = adapter as unknown as {
+				getWorkingDirectory: () => string;
+			};
+
+			expect(internal.getWorkingDirectory()).toBe(process.cwd());
+		});
+
 		it('maps available commands including input hints', () => {
 			adapter.handleAvailableCommands([
 				{ name: 'plan', description: 'Show the plan', input: { hint: 'optional topic' } },

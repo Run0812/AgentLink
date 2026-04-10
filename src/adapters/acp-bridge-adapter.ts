@@ -6,7 +6,9 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { spawn, ChildProcess } from 'node:child_process';
+import { resolve } from 'node:path';
 import { Writable, Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { App, TFile } from 'obsidian';
 
@@ -420,7 +422,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				contentBlocks.push({
 					type: 'resource',
 					resource: {
-						uri: `file://${process.cwd()}/current.md`,
+						uri: this.buildWorkspaceFileUri('current.md'),
 						text: input.context.fileContent,
 					},
 				});
@@ -878,7 +880,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		console.log('[ACP Adapter] Creating session...');
 
-		const cwd = process.cwd();
+		const cwd = this.getWorkingDirectory();
 		console.log('[ACP Adapter] Working directory:', cwd);
 
 		try {
@@ -942,6 +944,24 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		}
 
 		return null;
+	}
+
+	private getWorkingDirectory(): string {
+		const app = this.config.app;
+		const adapter = app?.vault.adapter;
+
+		if (adapter && 'getBasePath' in adapter && typeof adapter.getBasePath === 'function') {
+			const basePath = adapter.getBasePath();
+			if (basePath) {
+				return basePath;
+			}
+		}
+
+		return process.cwd();
+	}
+
+	private buildWorkspaceFileUri(relativePath: string): string {
+		return pathToFileURL(resolve(this.getWorkingDirectory(), relativePath)).toString();
 	}
 
 	private mapSessionModes(modes: unknown): SessionModeOption[] {

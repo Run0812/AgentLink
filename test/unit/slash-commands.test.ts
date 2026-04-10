@@ -4,17 +4,18 @@ import {
 	createAvailableCommandSuggestions,
 	createSlashCommandSuggestions,
 } from '../../src/ui/components/input-autocomplete';
+import { parseBuiltinSlashCommandPrompt } from '../../src/ui/slash-command-utils';
 
 describe('Slash Commands', () => {
 	describe('createSlashCommandSuggestions', () => {
 		it('should return all available commands', () => {
 			const commands = createSlashCommandSuggestions();
 
-			expect(commands).toHaveLength(4);
-			expect(commands.map((c) => c.id)).toContain('web');
-			expect(commands.map((c) => c.id)).toContain('test');
+			expect(commands).toHaveLength(2);
 			expect(commands.map((c) => c.id)).toContain('clear');
 			expect(commands.map((c) => c.id)).toContain('help');
+			expect(commands.map((c) => c.id)).not.toContain('web');
+			expect(commands.map((c) => c.id)).not.toContain('test');
 		});
 
 		it('should have correct command structure', () => {
@@ -87,7 +88,6 @@ describe('Slash Commands', () => {
 
 			expect(commands.filter((s) => s.label.toLowerCase().includes('cl')).map((c) => c.id)).toContain('clear');
 			expect(commands.filter((s) => s.label.toLowerCase().includes('he')).map((c) => c.id)).toContain('help');
-			expect(commands.filter((s) => s.label.toLowerCase().includes('te')).map((c) => c.id)).toContain('test');
 		});
 
 		it('should be case-insensitive', () => {
@@ -104,6 +104,20 @@ describe('Slash Commands', () => {
 			const filtered = commands.filter((s) => s.label.toLowerCase().includes('xyz123'));
 
 			expect(filtered).toHaveLength(0);
+		});
+	});
+
+	describe('builtin slash prompt parsing', () => {
+		it('parses a builtin slash command and args', () => {
+			expect(parseBuiltinSlashCommandPrompt('/help topic')).toEqual({
+				commandId: 'help',
+				args: 'topic',
+			});
+		});
+
+		it('returns null for non-builtin slash commands', () => {
+			expect(parseBuiltinSlashCommandPrompt('/web test')).toBeNull();
+			expect(parseBuiltinSlashCommandPrompt('/plan')).toBeNull();
 		});
 	});
 });

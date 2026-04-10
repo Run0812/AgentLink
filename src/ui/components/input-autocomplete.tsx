@@ -2,6 +2,7 @@ import { h, FunctionComponent } from 'preact';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
 import type { TFile, TFolder } from 'obsidian';
 import type { Skill, AvailableCommand } from '../../core/types';
+import { createBuiltinSlashCommandSuggestions } from '../slash-command-utils';
 
 export type AutocompleteTrigger = 'slash' | 'mention' | 'topic' | null;
 
@@ -140,16 +141,9 @@ export const InputAutocomplete: FunctionComponent<InputAutocompleteProps> = ({
 			return;
 		}
 
-		const itemTop = selectedEl.offsetTop;
-		const itemBottom = itemTop + selectedEl.offsetHeight;
-		const viewTop = listEl.scrollTop;
-		const viewBottom = viewTop + listEl.clientHeight;
-
-		if (itemTop < viewTop) {
-			listEl.scrollTop = itemTop;
-		} else if (itemBottom > viewBottom) {
-			listEl.scrollTop = itemBottom - listEl.clientHeight;
-		}
+		selectedEl.scrollIntoView({
+			block: 'nearest',
+		});
 	}, [selectedIndex, groupedItems]);
 
 	return (
@@ -385,36 +379,7 @@ function groupSuggestionsBySource(
  * 创建斜杠命令建议项（紧凑版）
  */
 export function createSlashCommandSuggestions(): SuggestionItem[] {
-	return [
-		{
-			id: 'web',
-			label: '/web',
-			description: 'Search web for information',
-			icon: '/',
-			source: 'builtin',
-		},
-		{
-			id: 'test',
-			label: '/test',
-			description: 'Run project tests',
-			icon: '/',
-			source: 'builtin',
-		},
-		{
-			id: 'clear',
-			label: '/clear',
-			description: 'Clear conversation',
-			icon: '/',
-			source: 'builtin',
-		},
-		{
-			id: 'help',
-			label: '/help',
-			description: 'Show help',
-			icon: '/',
-			source: 'builtin',
-		},
-	];
+	return createBuiltinSlashCommandSuggestions();
 }
 
 /**

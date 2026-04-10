@@ -22,6 +22,7 @@ import { SessionManager, SessionMetadata } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
 import { InputStateBar } from './components/input-state-bar';
 import { InputAutocomplete, createSlashCommandSuggestions, createAvailableCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger, buildAgentSlashCommandText } from './components/input-autocomplete';
+import { parseBuiltinSlashCommandPrompt } from './slash-command-utils';
 import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
@@ -739,7 +740,19 @@ export class ChatView extends ItemView {
 	// ── Message sending ────────────────────────────────────────────────
 
 	private async handleSend(): Promise<void> {
-		const prompt = this.inputEl.value.trim();
+		const originalPrompt = this.inputEl.value.trim();
+		if (!originalPrompt || this.isBusy) return;
+
+		const builtinCommand = parseBuiltinSlashCommandPrompt(originalPrompt);
+		if (builtinCommand) {
+			const handled = await this.executeSlashCommand(builtinCommand.commandId, builtinCommand.args);
+			if (handled) {
+				this.inputEl.value = '';
+				return;
+			}
+		}
+
+		const prompt = originalPrompt;
 		if (!prompt || this.isBusy) return;
 
 		if (!this.adapter) {
@@ -2187,19 +2200,16 @@ export class ChatView extends ItemView {
 		if (trigger === 'slash') {
 			const lastSlash = textBeforeCursor.lastIndexOf('/');
 			const commandId = item.id;
-
-			if (item.source === 'agent') {
-				const command = item.data as { name: string; description: string; input?: { hint: string } | null } | undefined;
-				const insertion = command
-					? buildAgentSlashCommandText(command)
-					: `/${commandId}`;
-				newText = textBeforeCursor.substring(0, lastSlash) + insertion + textAfterCursor;
-				newCursorPos = textBeforeCursor.substring(0, lastSlash).length + insertion.length;
-			} else {
-				await this.executeSlashCommand(commandId);
-				newText = textBeforeCursor.substring(0, lastSlash) + textAfterCursor;
-				newCursorPos = textBeforeCursor.substring(0, lastSlash).length;
-			}
+			const insertion = item.source === 'agent'
+				? (() => {
+					const command = item.data as { name: string; description: string; input?: { hint: string } | null } | undefined;
+					return command
+						? buildAgentSlashCommandText(command)
+						: `/${commandId}`;
+				})()
+				: item.label;
+			newText = textBeforeCursor.substring(0, lastSlash) + insertion + textAfterCursor;
+			newCursorPos = textBeforeCursor.substring(0, lastSlash).length + insertion.length;
 		} else if (trigger === 'mention') {
 			// Handle file/folder mention: attach as file and update input
 			const lastAt = textBeforeCursor.lastIndexOf('@');
@@ -2349,34 +2359,23 @@ export class ChatView extends ItemView {
 	}
 
 	/** Execute slash command */
-	private async executeSlashCommand(commandId: string): Promise<void> {
+	private async executeSlashCommand(commandId: string, args = ''): Promise<boolean> {
 		switch (commandId) {
 			case 'clear':
 				this.clearConversation();
 				new Notice('Conversation cleared');
-				break;
+				return true;
 				
 			case 'help':
 				this.showHelpMessage();
-				break;
-				
-			case 'test':
-				// Send a test message to agent
-				this.inputEl.value = 'Run project tests';
-				await this.handleSend();
-				break;
-				
-			case 'web':
-				// Prepare web search prompt
-				this.inputEl.value = 'Search the web for: ';
-				this.inputEl.focus();
-				// Place cursor at the end
-				this.inputEl.setSelectionRange(this.inputEl.value.length, this.inputEl.value.length);
-				break;
+				return true;
 				
 			default:
 				console.warn('[ChatView] Unknown slash command:', commandId);
-				new Notice(`Unknown command: /${commandId}`);
+				if (args) {
+					console.log('[ChatView] Slash command args:', args);
+				}
+				return false;
 		}
 	}
 
@@ -2387,8 +2386,6 @@ export class ChatView extends ItemView {
 **Slash Commands:**
 - **/clear** - Clear current conversation
 - **/help** - Show this help message
-- **/test** - Run project tests
-- **/web** - Search web for information
 
 **Shortcuts:**
 - **Enter** - Send message
