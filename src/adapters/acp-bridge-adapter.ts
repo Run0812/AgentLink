@@ -235,18 +235,22 @@ class AgentLinkAcpClient implements acp.Client {
 	}
 
 	async terminalOutput(params: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
+		console.log('[ACP Client] terminalOutput:', params.terminalId);
 		return { output: '', truncated: false };
 	}
 
 	async waitForTerminalExit(params: acp.WaitForTerminalExitRequest): Promise<acp.WaitForTerminalExitResponse> {
+		console.log('[ACP Client] waitForTerminalExit:', params.terminalId);
 		return { exitCode: 0, signal: null };
 	}
 
 	async killTerminal(params: acp.KillTerminalRequest): Promise<acp.KillTerminalResponse> {
+		console.log('[ACP Client] killTerminal:', params.terminalId);
 		return {};
 	}
 
 	async releaseTerminal(params: acp.ReleaseTerminalRequest): Promise<acp.ReleaseTerminalResponse> {
+		console.log('[ACP Client] releaseTerminal:', params.terminalId);
 		return {};
 	}
 }

@@ -40,7 +40,8 @@
 - 遵循 obsidian 插件开发规范
 
 ## UI框架
-- UI 框架使用 React
+- UI 框架使用 **Preact**（React 兼容的轻量替代方案）
+- 配置: tsconfig.json 设置 `"jsx": "react-jsx"`, `"jsxImportSource": "preact"`
 - 善于利用现成的控件，不要自己造太多轮子
 
 ## 必须使用ACP官方 SDK
