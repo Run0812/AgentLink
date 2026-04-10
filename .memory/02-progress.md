@@ -18,8 +18,151 @@
 | Phase 2 - 工具调用机制 | ✅ 已完成 | 100% |
 | Phase 3 - ACP Bridge Mode | ✅ 已完成 | 100% |
 | Phase 4 - 历史对话保存功能 | ✅ 已完成 | 100% |
-| Phase 5 - agent命令支持 | 🟡 **当前重点** | 0% |
+| Phase 5 - agent命令支持 | ✅ 已完成 | 100% |
 | Phase 6 - 工程加固与发布 | 🟡 进行中 | 20% |
+
+---
+
+## 2026-04-09 - 发布到 dev 目录测试 ✅
+
+**操作**: 将 Phase 5 构建产物发布到 dev vault
+
+### 构建产物
+
+```
+build/
+├── main.js       (846.2 KB)
+├── manifest.json (0.3 KB)
+└── styles.css    (11.3 KB)
+```
+
+### 发布位置
+
+复制到: `dev/.obsidian/plugins/agentlink/`
+
+**文件清单**:
+- ✅ main.js (846.18 KB) - 主程序，包含 Phase 5 功能
+- ✅ manifest.json (0.33 KB) - 插件清单
+- ✅ styles.css (11.30 KB) - 样式文件
+- ✅ data.json (1.59 KB) - 用户数据（保留）
+
+### 测试步骤
+
+1. 打开 Obsidian
+2. 打开 `dev/` 文件夹作为 vault
+3. 进入设置 → 社区插件 → 启用 AgentLink
+4. 测试新功能：
+   - 在输入框中输入 `/` 查看斜杠命令提示
+   - 输入 `@` 查看文件引用选择
+   - 点击"添加文件"按钮附加文件
+   - 发送消息查看附件是否正确传递
+
+### 功能验证
+
+- ✅ 构建成功（无错误）
+- ✅ 测试通过（71/71）
+- ✅ 文件已复制到 dev 目录
+- ✅ 准备进行集成测试
+
+---
+
+## 2026-04-09 - Phase 5 完成：Agent 命令支持 ✅
+
+**目标**: 实现 `/` 斜杠命令自动提示和 `@` 文件引用功能
+
+**状态**: ✅ **已完成**
+
+### 新增功能
+
+#### 1. ContextService 服务 ✅
+**文件**: `src/services/context-service.ts` (新增)
+
+**功能**:
+- 管理文件附件（读取、缓存、验证）
+- 管理文件夹附件
+- 管理选中文本附件
+- 文件搜索和过滤
+- 大小限制检查（单文件 1MB，总计 5MB）
+
+**主要方法**:
+- `createFileAttachment(path)` - 从文件路径创建附件
+- `createFolderAttachment(path)` - 从文件夹创建附件
+- `createSelectionAttachment(text)` - 从选中文本创建附件
+- `searchFiles(query)` - 搜索 vault 中的文件
+- `searchFolders(query)` - 搜索 vault 中的文件夹
+
+#### 2. InputStateBar 组件 ✅
+**文件**: `src/ui/components/input-state-bar.tsx` (新增)
+
+**功能**:
+- 显示在输入框上方
+- 显示已附加的文件/文件夹/选中文本标签
+- 每个标签显示类型图标、名称、大小
+- 支持点击 ✕ 删除附件
+- 显示总附件数和总大小
+- 快速添加按钮（当前笔记、选中文本、文件）
+
+#### 3. InputAutocomplete 组件 ✅
+**文件**: `src/ui/components/input-autocomplete.tsx` (新增)
+
+**功能**:
+- `/` 斜杠命令提示（支持 /web, /test, /clear, /help）
+- `@` 文件/文件夹引用选择
+- 键盘导航（↑↓选择，Enter确认，Esc关闭，Tab确认）
+- 模糊搜索匹配
+- 悬停高亮
+
+#### 4. ChatView 集成 ✅
+**文件**: `src/ui/chat-view.ts`
+
+**修改内容**:
+- 添加 ContextService 实例
+- 在 buildUI() 中添加输入状态栏容器
+- 添加自动完成事件监听
+- 修改 handleSend() 传递 attachments 到 AgentInput
+- 添加文件选择对话框
+- 添加选中文本和当前笔记附加功能
+
+#### 5. ACP Bridge Adapter 支持 ✅
+**文件**: `src/adapters/acp-bridge-adapter.ts`
+
+**修改内容**:
+- 将 attachments 转为 ACP resource ContentBlock
+- 补充 Console 日志（terminalOutput, waitForTerminalExit, killTerminal, releaseTerminal）
+
+### 技术细节
+
+**ACP 协议支持**:
+- 斜杠命令通过普通 text ContentBlock 发送（ACP 原生支持）
+- 文件引用通过 resource ContentBlock 发送（ACP 原生支持）
+
+**UI 布局**（符合 05-ui-ux.md）:
+```
+┌─────────────────────────────────────────────────────────────┐
+│ [附件标签] [附件标签]                      [+ 添加文件]       │ ← InputStateBar
+├─────────────────────────────────────────────────────────────┤
+│ /web search...                                              │ ← 输入框（输入 / 触发自动完成）
+│ @file...                                                    │ ← 输入框（输入 @ 触发文件选择）
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 文件变更
+
+**新增文件**:
+- `src/services/context-service.ts`
+- `src/ui/components/input-state-bar.tsx`
+- `src/ui/components/input-autocomplete.tsx`
+
+**修改文件**:
+- `src/ui/chat-view.ts` - 集成新功能
+- `src/adapters/acp-bridge-adapter.ts` - 支持 attachments
+- `src/core/types.ts` - 更新 Attachment 类型
+
+### 测试结果
+
+- ✅ 71 个单元测试全部通过
+- ✅ TypeScript 类型检查通过
+- ✅ 构建成功
 
 ---
 

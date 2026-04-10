@@ -146,10 +146,12 @@ export interface AgentInput {
 
 export interface Attachment {
 	id: string;
-	type: 'file' | 'selection' | 'note';
+	type: 'file' | 'folder' | 'selection' | 'note';
 	name: string;
+	path: string;
 	content: string;
 	size: number;
+	mimeType?: string;
 }
 
 export interface StreamHandlers {

@@ -19,6 +19,9 @@ import { SessionStore } from '../services/session-store';
 import { ToolExecutor, ToolExecutorConfig } from '../services/tool-executor';
 import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '../settings/settings';
 import { SessionManager, SessionMetadata } from '../services/session-manager';
+import { ContextService } from '../services/context-service';
+import { InputStateBar } from './components/input-state-bar';
+import { InputAutocomplete, createSlashCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger } from './components/input-autocomplete';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -29,6 +32,7 @@ export class ChatView extends ItemView {
 	private isBusy = false;
 	private sessionManager: SessionManager;
 	private currentSessionId: string | null = null;
+	private contextService: ContextService;
 
 	// Maximum number of recent messages to include as conversation context
 	private static readonly MAX_CONTEXT_MESSAGES = 20;
@@ -53,10 +57,20 @@ export class ChatView extends ItemView {
 	private sessionTitleEl!: HTMLElement;
 	private historyBtn!: HTMLButtonElement;
 	private newSessionBtn!: HTMLButtonElement;
+
+	// ── Bottom Toolbar DOM references ──────────────────────────────────
+	private bottomToolbar!: HTMLElement;
 	private statusLed!: HTMLElement;
 	private agentSelectorBtn!: HTMLButtonElement; // Agent 选择按钮
 	private modelSelectorBtn!: HTMLButtonElement; // 模型选择按钮
 	private quickConfigBtn!: HTMLButtonElement; // 快捷配置按钮
+
+	// ── Input Area ─────────────────────────────────────────────────────
+	private inputAreaContainer!: HTMLElement;
+	private inputRow!: HTMLElement;
+	private resizeHandle!: HTMLElement;
+	private inputMinHeight = 80;
+	private inputMaxHeightRatio = 0.5;
 
 	// ── Streaming state ────────────────────────────────────────────────
 	private streamingMsgId: string | null = null;
@@ -65,6 +79,10 @@ export class ChatView extends ItemView {
 	// ── ACP Session Config ───────────────────────────────────────────────
 	private sessionConfig: SessionConfigState = { configOptions: [] };
 	private configButtonsContainer!: HTMLElement;
+
+	// ── Phase 5: Input State & Autocomplete ─────────────────────────────
+	private inputStateContainer!: HTMLElement;
+	private autocompleteContainer!: HTMLElement;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -86,6 +104,7 @@ export class ChatView extends ItemView {
 			autoConfirmEdit: settings.autoConfirmEdit,
 		};
 		this.toolExecutor = new ToolExecutor(this.app, toolConfig);
+		this.contextService = new ContextService(this.app.vault);
 	}
 
 	getViewType(): string {
@@ -242,49 +261,115 @@ export class ChatView extends ItemView {
 		this.messagesEl.style.padding = '0.75rem';
 		this.initializeSession();
 
-		// Input area container
-		const inputContainer = container.createDiv();
-		inputContainer.style.borderTop = '1px solid var(--background-modifier-border)';
-		inputContainer.style.background = 'var(--background-secondary)';
+		// Input area container with resize handle
+		this.inputAreaContainer = container.createDiv();
+		this.inputAreaContainer.style.borderTop = '1px solid var(--background-modifier-border)';
+		this.inputAreaContainer.style.background = 'var(--background-secondary)';
+		this.inputAreaContainer.style.display = 'flex';
+		this.inputAreaContainer.style.flexDirection = 'column';
+		this.inputAreaContainer.style.minHeight = `${this.inputMinHeight}px`;
+		this.inputAreaContainer.style.position = 'relative';
+
+		// Phase 5: Input state bar container (above input row)
+		this.inputStateContainer = this.inputAreaContainer.createDiv();
+		this.inputStateContainer.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.inputStateContainer.style.background = 'var(--background-secondary)';
+		this.renderInputStateBar();
 		
-		// Agent selector row (above input box)
-		const agentSelectorRow = inputContainer.createDiv();
-		agentSelectorRow.style.display = 'flex';
-		agentSelectorRow.style.alignItems = 'center';
-		agentSelectorRow.style.gap = '0.4rem';
-		agentSelectorRow.style.padding = '0.4rem 0.6rem 0.2rem';
+		// Phase 5: Autocomplete container (absolute positioned, will be placed above input)
+		this.autocompleteContainer = this.inputAreaContainer.createDiv();
+		this.autocompleteContainer.style.position = 'absolute';
+		this.autocompleteContainer.style.left = '0.6rem';
+		this.autocompleteContainer.style.right = '0.6rem';
+		this.autocompleteContainer.style.bottom = '100%';
+		this.autocompleteContainer.style.zIndex = '1000';
+
+		// Input row with textarea
+		this.inputRow = this.inputAreaContainer.createDiv();
+		this.inputRow.style.display = 'flex';
+		this.inputRow.style.flexDirection = 'column';
+		this.inputRow.style.flex = '1';
+		this.inputRow.style.minHeight = '60px';
+		this.inputRow.style.position = 'relative';
+
+		// Create textarea
+		this.inputEl = this.inputRow.createEl('textarea', { placeholder: 'Ask your AI agent…' });
+		this.inputEl.style.width = '100%';
+		this.inputEl.style.height = '100%';
+		this.inputEl.style.minHeight = '60px';
+		this.inputEl.style.padding = '0.5rem 0.6rem';
+		this.inputEl.style.border = 'none';
+		this.inputEl.style.background = 'transparent';
+		this.inputEl.style.fontSize = '0.9rem';
+		this.inputEl.style.resize = 'none';
+		this.inputEl.style.outline = 'none';
+		this.inputEl.addEventListener('keydown', (evt) => {
+			if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
+				evt.preventDefault();
+				this.handleSend();
+			}
+		});
+
+		// Resize handle at the top of input area (between messages and input)
+		this.resizeHandle = this.inputAreaContainer.createDiv();
+		this.resizeHandle.style.position = 'absolute';
+		this.resizeHandle.style.top = '-3px';
+		this.resizeHandle.style.left = '0';
+		this.resizeHandle.style.right = '0';
+		this.resizeHandle.style.height = '6px';
+		this.resizeHandle.style.cursor = 'row-resize';
+		this.resizeHandle.style.zIndex = '10';
+		this.resizeHandle.style.background = 'transparent';
+		this.setupResizeHandle();
+
+		// Bottom toolbar: Status LED + Agent + Model + Config + Send/Stop
+		this.bottomToolbar = container.createDiv();
+		this.bottomToolbar.style.display = 'flex';
+		this.bottomToolbar.style.alignItems = 'center';
+		this.bottomToolbar.style.gap = '0.4rem';
+		this.bottomToolbar.style.padding = '0.3rem 0.6rem';
+		this.bottomToolbar.style.borderTop = '1px solid var(--background-modifier-border)';
+		this.bottomToolbar.style.background = 'var(--background-secondary)';
 		
-		// Agent selector button with dropdown (shows actual agent name)
-		const agentContainer = agentSelectorRow.createDiv();
+		// Status LED (leftmost)
+		this.statusLed = this.bottomToolbar.createEl('span');
+		this.statusLed.style.width = '7px';
+		this.statusLed.style.height = '7px';
+		this.statusLed.style.borderRadius = '50%';
+		this.statusLed.style.background = '#6b7280';
+		this.statusLed.style.transition = 'all 0.15s ease';
+		this.statusLed.style.flexShrink = '0';
+		this.statusLed.style.boxShadow = '0 0 3px currentColor';
+		
+		// Agent selector button with dropdown (in bottom toolbar)
+		const agentContainer = this.bottomToolbar.createDiv();
 		agentContainer.style.position = 'relative';
 		this.agentSelectorBtn = agentContainer.createEl('button');
 		this.agentSelectorBtn.style.display = 'flex';
 		this.agentSelectorBtn.style.alignItems = 'center';
-		this.agentSelectorBtn.style.gap = '0.3rem';
-		this.agentSelectorBtn.style.padding = '0.3rem 0.5rem';
-		this.agentSelectorBtn.style.background = 'var(--background-secondary)';
+		this.agentSelectorBtn.style.gap = '0.25rem';
+		this.agentSelectorBtn.style.padding = '0.25rem 0.4rem';
+		this.agentSelectorBtn.style.background = 'transparent';
 		this.agentSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
 		this.agentSelectorBtn.style.borderRadius = '4px';
 		this.agentSelectorBtn.style.cursor = 'pointer';
-		this.agentSelectorBtn.style.fontSize = '0.85rem';
+		this.agentSelectorBtn.style.fontSize = '0.75rem';
 		this.agentSelectorBtn.style.color = 'var(--text-normal)';
 		this.agentSelectorBtn.style.whiteSpace = 'nowrap';
+		this.agentSelectorBtn.style.height = '24px';
 		
-		const agentIcon = this.agentSelectorBtn.createEl('span');
-		agentIcon.innerHTML = '🤖';
-		agentIcon.style.fontSize = '0.9rem';
 		const agentText = this.agentSelectorBtn.createEl('span');
 		agentText.textContent = 'Agent'; // Will be updated by refreshStatus
-		agentText.style.maxWidth = '150px';
+		agentText.style.maxWidth = '100px';
 		agentText.style.overflow = 'hidden';
 		agentText.style.textOverflow = 'ellipsis';
 		agentText.style.whiteSpace = 'nowrap';
 		const agentArrow = this.agentSelectorBtn.createEl('span');
 		agentArrow.innerHTML = '▾';
-		agentArrow.style.fontSize = '0.7rem';
+		agentArrow.style.fontSize = '0.6rem';
 		agentArrow.style.opacity = '0.6';
 		
-		// Agent dropdown
+		// Agent dropdown (opens upward)
 		const agentDropdown = agentContainer.createDiv();
 		agentDropdown.style.display = 'none';
 		this.agentSelectorBtn.addEventListener('click', (e) => {
@@ -294,92 +379,85 @@ export class ChatView extends ItemView {
 			if (!isOpen) this.renderAgentDropdown(agentDropdown);
 		});
 		document.addEventListener('click', () => agentDropdown.style.display = 'none');
-		
-		// Status LED (next to agent selector, NOT in header)
-		this.statusLed = agentSelectorRow.createEl('span');
-		this.statusLed.style.width = '8px';
-		this.statusLed.style.height = '8px';
-		this.statusLed.style.borderRadius = '50%';
-		this.statusLed.style.background = '#6b7280';
-		this.statusLed.style.transition = 'all 0.15s ease';
-		this.statusLed.style.flexShrink = '0';
-		
-		// Input row with resizable textarea
-		const inputRow = inputContainer.createDiv();
-		inputRow.style.display = 'flex';
-		inputRow.style.gap = '0.5rem';
-		inputRow.style.padding = '0.6rem';
-		inputRow.style.borderBottom = '1px solid var(--background-modifier-border)';
 
-		// Create a wrapper for the textarea to handle resizing
-		const textareaWrapper = inputRow.createDiv();
-		textareaWrapper.style.flex = '1';
-		textareaWrapper.style.display = 'flex';
-		textareaWrapper.style.flexDirection = 'column';
-		textareaWrapper.style.minHeight = '2.8rem';
-		textareaWrapper.style.position = 'relative';
-
-		this.inputEl = textareaWrapper.createEl('textarea', { placeholder: 'Ask your AI agent…' });
-		this.inputEl.style.width = '100%';
-		this.inputEl.style.height = '2.8rem';
-		this.inputEl.style.minHeight = '2.8rem';
-		this.inputEl.style.maxHeight = '300px';
-		this.inputEl.style.resize = 'vertical';
-		this.inputEl.style.padding = '0.5rem 0.6rem';
-		this.inputEl.style.border = '1px solid var(--background-modifier-border)';
-		this.inputEl.style.borderRadius = '6px';
-		this.inputEl.style.background = 'var(--background-primary)';
-		this.inputEl.style.fontSize = '0.9rem';
-		this.inputEl.addEventListener('keydown', (evt) => {
-			if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
-				evt.preventDefault();
-				this.handleSend();
-			}
+		// Model selector button with dropdown
+		const modelContainer = this.bottomToolbar.createDiv();
+		modelContainer.style.position = 'relative';
+		this.modelSelectorBtn = modelContainer.createEl('button');
+		this.modelSelectorBtn.style.display = 'flex';
+		this.modelSelectorBtn.style.alignItems = 'center';
+		this.modelSelectorBtn.style.gap = '0.25rem';
+		this.modelSelectorBtn.style.padding = '0.25rem 0.4rem';
+		this.modelSelectorBtn.style.background = 'transparent';
+		this.modelSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
+		this.modelSelectorBtn.style.borderRadius = '4px';
+		this.modelSelectorBtn.style.cursor = 'pointer';
+		this.modelSelectorBtn.style.fontSize = '0.75rem';
+		this.modelSelectorBtn.style.color = 'var(--text-muted)';
+		this.modelSelectorBtn.style.whiteSpace = 'nowrap';
+		this.modelSelectorBtn.style.height = '24px';
+		
+		const modelText = this.modelSelectorBtn.createEl('span', { text: 'Model' });
+		modelText.style.maxWidth = '80px';
+		modelText.style.overflow = 'hidden';
+		modelText.style.textOverflow = 'ellipsis';
+		modelText.style.whiteSpace = 'nowrap';
+		const modelArrow = this.modelSelectorBtn.createEl('span');
+		modelArrow.innerHTML = '▾';
+		modelArrow.style.fontSize = '0.6rem';
+		modelArrow.style.opacity = '0.6';
+		
+		// Model dropdown (opens upward)
+		const modelDropdown = modelContainer.createDiv();
+		modelDropdown.style.display = 'none';
+		this.modelSelectorBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const isOpen = modelDropdown.style.display !== 'none';
+			modelDropdown.style.display = isOpen ? 'none' : 'block';
+			if (!isOpen) this.renderModelDropdown(modelDropdown);
 		});
+		document.addEventListener('click', () => modelDropdown.style.display = 'none');
 
-		// Bottom toolbar: Dynamic configOptions + Send/Stop button
-		const bottomToolbar = inputContainer.createDiv();
-		bottomToolbar.style.display = 'flex';
-		bottomToolbar.style.alignItems = 'center';
-		bottomToolbar.style.justifyContent = 'space-between';
-		bottomToolbar.style.padding = '0.4rem 0.6rem';
-		bottomToolbar.style.gap = '0.5rem';
-		
 		// Container for dynamic configOptions
-		this.configButtonsContainer = bottomToolbar.createDiv();
+		this.configButtonsContainer = this.bottomToolbar.createDiv();
 		this.configButtonsContainer.style.display = 'flex';
 		this.configButtonsContainer.style.alignItems = 'center';
 		this.configButtonsContainer.style.gap = '0.3rem';
+		this.configButtonsContainer.style.flex = '1';
 		
 		// Right: Send/Stop button
-		const sendBtnContainer = bottomToolbar.createDiv();
+		const sendBtnContainer = this.bottomToolbar.createDiv();
 		sendBtnContainer.style.marginLeft = 'auto';
 		
 		this.sendBtn = sendBtnContainer.createEl('button', { text: 'Send' });
-		this.sendBtn.style.padding = '0.3rem 1.2rem';
-		this.sendBtn.style.height = '1.8rem';
+		this.sendBtn.style.padding = '0.25rem 1rem';
+		this.sendBtn.style.height = '24px';
 		this.sendBtn.style.background = 'var(--interactive-accent)';
 		this.sendBtn.style.color = 'var(--text-on-accent)';
 		this.sendBtn.style.border = 'none';
 		this.sendBtn.style.borderRadius = '4px';
 		this.sendBtn.style.cursor = 'pointer';
-		this.sendBtn.style.fontSize = '0.8rem';
+		this.sendBtn.style.fontSize = '0.75rem';
+		this.sendBtn.style.fontWeight = '500';
 		this.sendBtn.addEventListener('click', () => this.handleSend());
 
 		this.stopBtn = sendBtnContainer.createEl('button', { text: 'Stop' });
-		this.stopBtn.style.padding = '0.3rem 1.2rem';
-		this.stopBtn.style.height = '1.8rem';
+		this.stopBtn.style.padding = '0.25rem 1rem';
+		this.stopBtn.style.height = '24px';
 		this.stopBtn.style.background = 'var(--background-modifier-error)';
 		this.stopBtn.style.color = 'var(--text-on-accent)';
 		this.stopBtn.style.border = 'none';
 		this.stopBtn.style.borderRadius = '4px';
 		this.stopBtn.style.cursor = 'pointer';
-		this.stopBtn.style.fontSize = '0.8rem';
+		this.stopBtn.style.fontSize = '0.75rem';
 		this.stopBtn.style.display = 'none';
 		this.stopBtn.addEventListener('click', () => this.handleStop());
 
 		// Load and render configOptions from adapter
 		this.loadConfigOptions();
+
+		// Phase 5: Setup autocomplete listeners
+		this.setupAutocompleteListeners();
 
 		// Add animation styles
 		if (!document.getElementById('agentlink-animations')) {
@@ -395,6 +473,39 @@ export class ChatView extends ItemView {
 		}
 
 		this.refreshStatus();
+	}
+
+	// ── Resize Handle ────────────────────────────────────────────────────
+
+	private setupResizeHandle(): void {
+		let isResizing = false;
+		let startY = 0;
+		let startHeight = 0;
+
+		this.resizeHandle.addEventListener('mousedown', (e) => {
+			isResizing = true;
+			startY = e.clientY;
+			startHeight = this.inputAreaContainer.offsetHeight;
+			document.body.style.cursor = 'row-resize';
+			e.preventDefault();
+		});
+
+		document.addEventListener('mousemove', (e) => {
+			if (!isResizing) return;
+			const deltaY = startY - e.clientY;
+			const newHeight = Math.max(this.inputMinHeight, startHeight + deltaY);
+			const maxHeight = this.containerEl.offsetHeight * this.inputMaxHeightRatio;
+			const clampedHeight = Math.min(newHeight, maxHeight);
+			this.inputAreaContainer.style.height = `${clampedHeight}px`;
+			this.inputAreaContainer.style.flex = 'none';
+		});
+
+		document.addEventListener('mouseup', () => {
+			if (isResizing) {
+				isResizing = false;
+				document.body.style.cursor = '';
+			}
+		});
 	}
 
 	// ── Config Options (Dynamic rendering) ───────────────────────────────────
@@ -488,6 +599,7 @@ export class ChatView extends ItemView {
 
 		const input: AgentInput = {
 			prompt,
+			attachments: this.contextService.listAttachments(),
 			context: { fileContent, selectedText },
 			history: this.session.getRecentMessages(ChatView.MAX_CONTEXT_MESSAGES).slice(0, -1), // exclude the just-added placeholder
 		};
@@ -754,7 +866,7 @@ export class ChatView extends ItemView {
 		this.session.clear();
 		this.messagesEl.empty();
 		this.renderWelcome();
-		this.statusEl.setText('');
+		this.statusEl?.setText('');
 	}
 
 	private setBusy(busy: boolean): void {
@@ -780,7 +892,7 @@ export class ChatView extends ItemView {
 		// Update agent selector text to show actual agent name
 		if (this.agentSelectorBtn) {
 			const activeBackend = getActiveBackendConfig(this.settings);
-			const agentText = this.agentSelectorBtn.querySelector('span:nth-child(2)') as HTMLElement;
+			const agentText = this.agentSelectorBtn.querySelector('span') as HTMLElement;
 			if (agentText && activeBackend) {
 				agentText.textContent = activeBackend.name;
 			}
@@ -1273,32 +1385,33 @@ export class ChatView extends ItemView {
 		container.empty();
 		container.style.display = 'block';
 		container.style.position = 'absolute';
-		container.style.top = '100%';
+		container.style.bottom = '100%';
 		container.style.left = '0';
 		container.style.zIndex = '1000';
 		container.style.minWidth = '200px';
 		container.style.maxWidth = '280px';
 		container.style.maxHeight = '300px';
 		container.style.overflowY = 'auto';
-		container.style.padding = '0.4rem';
+		container.style.padding = '0.3rem';
 		container.style.background = 'var(--background-primary)';
 		container.style.border = '1px solid var(--background-modifier-border)';
 		container.style.borderRadius = '6px';
 		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+		container.style.marginBottom = '0.3rem';
 
 		const header = container.createEl('div', { text: 'Select Agent' });
-		header.style.fontSize = '0.75rem';
+		header.style.fontSize = '0.7rem';
 		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.3rem 0.5rem';
-		header.style.marginBottom = '0.3rem';
+		header.style.padding = '0.25rem 0.4rem';
+		header.style.marginBottom = '0.2rem';
 		header.style.borderBottom = '1px solid var(--background-modifier-border)';
 
 		// Show message if no enabled backends
 		if (backends.length === 0) {
 			const emptyMsg = container.createEl('div', { text: 'No enabled agents. Enable agents in settings.' });
-			emptyMsg.style.padding = '0.75rem';
+			emptyMsg.style.padding = '0.5rem';
 			emptyMsg.style.color = 'var(--text-muted)';
-			emptyMsg.style.fontSize = '0.85rem';
+			emptyMsg.style.fontSize = '0.75rem';
 			emptyMsg.style.textAlign = 'center';
 			return;
 		}
@@ -1309,9 +1422,9 @@ export class ChatView extends ItemView {
 			item.style.width = '100%';
 			item.style.display = 'flex';
 			item.style.alignItems = 'center';
-			item.style.gap = '0.4rem';
-			item.style.padding = '0.5rem';
-			item.style.marginBottom = '0.2rem';
+			item.style.gap = '0.3rem';
+			item.style.padding = '0.35rem 0.4rem';
+			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
 			item.style.background = backend.id === activeBackend?.id
@@ -1323,17 +1436,18 @@ export class ChatView extends ItemView {
 
 			const icon = item.createEl('span');
 			icon.innerHTML = backend.type === 'mock' ? '🧪' : '🤖';
-			icon.style.fontSize = '0.9rem';
+			icon.style.fontSize = '0.8rem';
 
 			const name = item.createEl('span', { text: backend.name });
 			name.style.flex = '1';
-			name.style.fontSize = '0.85rem';
+			name.style.fontSize = '0.75rem';
 
 			if (backend.id === activeBackend?.id) {
 				const check = item.createEl('span');
 				check.innerHTML = '✓';
 				check.style.color = 'var(--interactive-accent)';
 				check.style.fontWeight = 'bold';
+				check.style.fontSize = '0.75rem';
 			}
 
 			item.addEventListener('click', async () => {
@@ -1356,9 +1470,9 @@ export class ChatView extends ItemView {
 		container.style.bottom = '100%';
 		container.style.left = '0';
 		container.style.zIndex = '1000';
-		container.style.minWidth = '180px';
-		container.style.maxWidth = '260px';
-		container.style.padding = '0.4rem';
+		container.style.minWidth = '160px';
+		container.style.maxWidth = '240px';
+		container.style.padding = '0.3rem';
 		container.style.background = 'var(--background-primary)';
 		container.style.border = '1px solid var(--background-modifier-border)';
 		container.style.borderRadius = '6px';
@@ -1366,10 +1480,10 @@ export class ChatView extends ItemView {
 		container.style.marginBottom = '0.3rem';
 
 		const header = container.createEl('div', { text: 'Model' });
-		header.style.fontSize = '0.75rem';
+		header.style.fontSize = '0.7rem';
 		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.3rem 0.5rem';
-		header.style.marginBottom = '0.3rem';
+		header.style.padding = '0.25rem 0.4rem';
+		header.style.marginBottom = '0.2rem';
 		header.style.borderBottom = '1px solid var(--background-modifier-border)';
 
 		const models = [
@@ -1383,8 +1497,8 @@ export class ChatView extends ItemView {
 			item.type = 'button';
 			item.style.width = '100%';
 			item.style.display = 'block';
-			item.style.padding = '0.5rem';
-			item.style.marginBottom = '0.2rem';
+			item.style.padding = '0.35rem 0.4rem';
+			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
 			item.style.background = 'transparent';
@@ -1393,15 +1507,15 @@ export class ChatView extends ItemView {
 			item.style.cursor = 'pointer';
 
 			const name = item.createEl('div', { text: model.name });
-			name.style.fontSize = '0.85rem';
+			name.style.fontSize = '0.75rem';
 			name.style.fontWeight = '600';
 
 			const desc = item.createEl('div', { text: model.desc });
-			desc.style.fontSize = '0.75rem';
+			desc.style.fontSize = '0.7rem';
 			desc.style.color = 'var(--text-muted)';
 
 			item.addEventListener('click', () => {
-				const btnText = this.modelSelectorBtn.querySelector('span:nth-child(2)');
+				const btnText = this.modelSelectorBtn.querySelector('span');
 				if (btnText) btnText.textContent = model.name;
 				container.style.display = 'none';
 				new Notice(`Model: ${model.name}`);
@@ -1412,8 +1526,8 @@ export class ChatView extends ItemView {
 		configureItem.type = 'button';
 		configureItem.style.width = '100%';
 		configureItem.style.display = 'block';
-		configureItem.style.padding = '0.5rem';
-		configureItem.style.marginTop = '0.3rem';
+		configureItem.style.padding = '0.35rem 0.4rem';
+		configureItem.style.marginTop = '0.2rem';
 		configureItem.style.border = 'none';
 		configureItem.style.borderTop = '1px solid var(--background-modifier-border)';
 		configureItem.style.borderRadius = '0';
@@ -1421,7 +1535,7 @@ export class ChatView extends ItemView {
 		configureItem.style.color = 'var(--text-muted)';
 		configureItem.style.textAlign = 'left';
 		configureItem.style.cursor = 'pointer';
-		configureItem.style.fontSize = '0.8rem';
+		configureItem.style.fontSize = '0.7rem';
 		configureItem.textContent = 'Configure...';
 		configureItem.addEventListener('click', () => {
 			container.style.display = 'none';
@@ -1447,8 +1561,8 @@ export class ChatView extends ItemView {
 		container.style.bottom = '100%';
 		container.style.right = '0';
 		container.style.zIndex = '1000';
-		container.style.minWidth = '160px';
-		container.style.padding = '0.4rem';
+		container.style.minWidth = '140px';
+		container.style.padding = '0.3rem';
 		container.style.background = 'var(--background-primary)';
 		container.style.border = '1px solid var(--background-modifier-border)';
 		container.style.borderRadius = '6px';
@@ -1456,10 +1570,10 @@ export class ChatView extends ItemView {
 		container.style.marginBottom = '0.3rem';
 
 		const header = container.createEl('div', { text: 'Thinking' });
-		header.style.fontSize = '0.75rem';
+		header.style.fontSize = '0.7rem';
 		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.3rem 0.5rem';
-		header.style.marginBottom = '0.3rem';
+		header.style.padding = '0.25rem 0.4rem';
+		header.style.marginBottom = '0.2rem';
 		header.style.borderBottom = '1px solid var(--background-modifier-border)';
 
 		for (const mode of modes) {
@@ -1468,8 +1582,8 @@ export class ChatView extends ItemView {
 			item.style.width = '100%';
 			item.style.display = 'flex';
 			item.style.flexDirection = 'column';
-			item.style.padding = '0.5rem';
-			item.style.marginBottom = '0.2rem';
+			item.style.padding = '0.35rem 0.4rem';
+			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
 			item.style.background = mode.id === this.settings.thinkingMode
@@ -1482,10 +1596,10 @@ export class ChatView extends ItemView {
 			const nameRow = item.createEl('div');
 			nameRow.style.display = 'flex';
 			nameRow.style.alignItems = 'center';
-			nameRow.style.gap = '0.4rem';
+			nameRow.style.gap = '0.3rem';
 
 			const name = nameRow.createEl('span', { text: mode.name });
-			name.style.fontSize = '0.85rem';
+			name.style.fontSize = '0.75rem';
 			name.style.fontWeight = '600';
 
 			if (mode.id === this.settings.thinkingMode) {
@@ -1493,10 +1607,11 @@ export class ChatView extends ItemView {
 				check.innerHTML = '✓';
 				check.style.color = 'var(--interactive-accent)';
 				check.style.fontWeight = 'bold';
+				check.style.fontSize = '0.75rem';
 			}
 
 			const desc = item.createEl('div', { text: mode.desc });
-			desc.style.fontSize = '0.75rem';
+			desc.style.fontSize = '0.7rem';
 			desc.style.color = 'var(--text-muted)';
 
 			item.addEventListener('click', async () => {
@@ -1525,7 +1640,7 @@ export class ChatView extends ItemView {
 		container.style.maxWidth = '360px';
 		container.style.maxHeight = '320px';
 		container.style.overflowY = 'auto';
-		container.style.padding = '0.5rem';
+		container.style.padding = '0.4rem';
 		container.style.background = 'var(--background-primary)';
 		container.style.border = '1px solid var(--background-modifier-border)';
 		container.style.borderRadius = '8px';
@@ -1553,8 +1668,8 @@ export class ChatView extends ItemView {
 			item.style.display = 'flex';
 			item.style.alignItems = 'center';
 			item.style.gap = '0.4rem';
-			item.style.padding = '0.5rem';
-			item.style.marginBottom = '0.35rem';
+			item.style.padding = '0.4rem';
+			item.style.marginBottom = '0.25rem';
 			item.style.border = `1px solid ${session.id === this.currentSessionId ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}`;
 			item.style.borderRadius = '6px';
 			item.style.background = session.id === this.currentSessionId
@@ -1569,8 +1684,8 @@ export class ChatView extends ItemView {
 			
 			const title = info.createEl('div', { text: session.title });
 			title.style.fontWeight = '600';
-			title.style.fontSize = '0.9rem';
-			title.style.marginBottom = '0.15rem';
+			title.style.fontSize = '0.85rem';
+			title.style.marginBottom = '0.1rem';
 			title.style.whiteSpace = 'nowrap';
 			title.style.overflow = 'hidden';
 			title.style.textOverflow = 'ellipsis';
@@ -1579,7 +1694,7 @@ export class ChatView extends ItemView {
 			const meta = info.createEl('div', {
 				text: `${date} • ${session.messageCount} messages`,
 			});
-			meta.style.fontSize = '0.8rem';
+			meta.style.fontSize = '0.75rem';
 			meta.style.color = 'var(--text-muted)';
 
 			info.addEventListener('click', () => {
@@ -1595,7 +1710,7 @@ export class ChatView extends ItemView {
 			deleteBtn.style.border = 'none';
 			deleteBtn.style.borderRadius = '4px';
 			deleteBtn.style.cursor = 'pointer';
-			deleteBtn.style.fontSize = '0.85rem';
+			deleteBtn.style.fontSize = '0.8rem';
 			deleteBtn.style.color = 'var(--text-muted)';
 			deleteBtn.style.opacity = '0.6';
 			deleteBtn.addEventListener('mouseenter', () => {
@@ -1723,6 +1838,323 @@ export class ChatView extends ItemView {
 				this.session.getMessages(),
 				backend?.id
 			);
+		}
+	}
+
+	// ── Phase 5: Input State Bar & Autocomplete ─────────────────────────
+
+	/** Render the input state bar with attachments */
+	private renderInputStateBar(): void {
+		if (!this.inputStateContainer) return;
+
+		const editor = this.app.workspace.activeEditor?.editor;
+		const hasSelection = editor ? editor.getSelection().length > 0 : false;
+
+		render(
+			h(InputStateBar, {
+				attachments: this.contextService.listAttachments(),
+				totalSize: this.contextService.getTotalSize(),
+				onRemoveAttachment: (id: string) => {
+					this.contextService.removeAttachment(id);
+					this.renderInputStateBar();
+				},
+				onAttachFile: () => this.handleAttachFile(),
+				onAttachSelection: () => this.handleAttachSelection(),
+				onAttachCurrentNote: () => this.handleAttachCurrentNote(),
+				canAttachSelection: hasSelection,
+			}),
+			this.inputStateContainer
+		);
+	}
+
+	/** Setup autocomplete listeners for input */
+	private setupAutocompleteListeners(): void {
+		if (!this.inputEl) return;
+
+		let currentTrigger: AutocompleteTrigger = null;
+		let currentQuery = '';
+
+		this.inputEl.addEventListener('input', (e) => {
+			const value = this.inputEl.value;
+			const cursorPos = this.inputEl.selectionStart || 0;
+			const textBeforeCursor = value.substring(0, cursorPos);
+
+			// Check for trigger characters
+			const lastSlash = textBeforeCursor.lastIndexOf('/');
+			const lastAt = textBeforeCursor.lastIndexOf('@');
+			const lastHash = textBeforeCursor.lastIndexOf('#');
+			const lastSpace = Math.max(
+				textBeforeCursor.lastIndexOf(' '),
+				textBeforeCursor.lastIndexOf('\n')
+			);
+
+			// Determine if we're in a trigger context (find the most recent trigger)
+			const triggers = [
+				{ char: '/', index: lastSlash, type: 'slash' as const },
+				{ char: '@', index: lastAt, type: 'mention' as const },
+				{ char: '#', index: lastHash, type: 'topic' as const },
+			];
+			
+			const activeTrigger = triggers
+				.filter(t => t.index > lastSpace)
+				.sort((a, b) => b.index - a.index)[0];
+
+			if (activeTrigger) {
+				currentTrigger = activeTrigger.type;
+				currentQuery = textBeforeCursor.substring(activeTrigger.index + 1);
+			} else {
+				currentTrigger = null;
+				currentQuery = '';
+			}
+
+			if (currentTrigger) {
+				this.showAutocomplete(currentTrigger, currentQuery);
+			} else {
+				this.hideAutocomplete();
+			}
+		});
+	}
+
+	/** Show autocomplete menu */
+	private showAutocomplete(trigger: AutocompleteTrigger, query: string): void {
+		if (!this.autocompleteContainer) return;
+
+		let suggestions: Array<{ id: string; label: string; description?: string; icon?: string; data?: unknown }> = [];
+
+		if (trigger === 'slash') {
+			suggestions = createSlashCommandSuggestions().filter(s =>
+				s.label.toLowerCase().includes(query.toLowerCase())
+			);
+		} else if (trigger === 'mention') {
+			const files = this.contextService.searchFiles(query, 10);
+			const folders = this.contextService.searchFolders(query, 5);
+			suggestions = [
+				...createFileSuggestions(files),
+				...createFolderSuggestions(folders),
+			];
+		} else if (trigger === 'topic') {
+			// Get topics from session history
+			const sessionTopics = this.extractSessionTopics();
+			suggestions = createTopicSuggestions(sessionTopics, query);
+		}
+
+		// Position autocomplete above the input
+		const position = {
+			x: 0,
+			y: 0,
+		};
+
+		render(
+			h(InputAutocomplete, {
+				trigger,
+				query,
+				position,
+				suggestions,
+				onSelect: (item) => {
+					this.handleAutocompleteSelect(item, trigger);
+					this.hideAutocomplete();
+				},
+				onClose: () => this.hideAutocomplete(),
+			}),
+			this.autocompleteContainer
+		);
+	}
+
+	/** Extract topics from session history */
+	private extractSessionTopics(): string[] {
+		const messages = this.session.getMessages();
+		const topics = new Set<string>();
+		
+		// Add some default topics
+		const defaultTopics = [
+			'Current Session',
+			'Previous Context',
+			'Workspace',
+			'Recent Files',
+		];
+		defaultTopics.forEach(t => topics.add(t));
+		
+		// Extract keywords from user messages
+		messages
+			.filter(m => m.role === 'user')
+			.slice(-5)
+			.forEach(m => {
+				const words = m.content.split(/\s+/).filter(w => w.length > 4);
+				words.slice(0, 3).forEach(w => topics.add(w));
+			});
+		
+		return Array.from(topics).slice(0, 10);
+	}
+
+	/** Hide autocomplete menu */
+	private hideAutocomplete(): void {
+		if (this.autocompleteContainer) {
+			render(null, this.autocompleteContainer);
+		}
+	}
+
+	/** Handle autocomplete item selection */
+	private handleAutocompleteSelect(
+		item: { id: string; label: string; description?: string; icon?: string; data?: unknown },
+		trigger: AutocompleteTrigger
+	): void {
+		const value = this.inputEl.value;
+		const cursorPos = this.inputEl.selectionStart || 0;
+		const textBeforeCursor = value.substring(0, cursorPos);
+		const textAfterCursor = value.substring(cursorPos);
+
+		let newText = '';
+		if (trigger === 'slash') {
+			// Replace /command with the command
+			const lastSlash = textBeforeCursor.lastIndexOf('/');
+			newText = textBeforeCursor.substring(0, lastSlash) + item.label + ' ' + textAfterCursor;
+		} else if (trigger === 'mention') {
+			// Replace @file with the file reference
+			const lastAt = textBeforeCursor.lastIndexOf('@');
+			const file = item.data as { path: string };
+			newText = textBeforeCursor.substring(0, lastAt) + '@' + (file?.path || item.label) + ' ' + textAfterCursor;
+		} else if (trigger === 'topic') {
+			// Replace #topic with the topic reference
+			const lastHash = textBeforeCursor.lastIndexOf('#');
+			newText = textBeforeCursor.substring(0, lastHash) + '#' + item.label + ' ' + textAfterCursor;
+		}
+
+		this.inputEl.value = newText;
+		this.inputEl.focus();
+	}
+
+	/** Handle attach file button click */
+	private async handleAttachFile(): Promise<void> {
+		// Open file suggester modal
+		const files = this.app.vault.getFiles();
+		const filePaths = files.map(f => f.path).sort();
+
+		// Simple prompt for now - could use a proper suggester modal
+		const selectedPath = await this.promptForFile(filePaths);
+		if (selectedPath) {
+			const attachment = await this.contextService.createFileAttachment(selectedPath);
+			if (attachment) {
+				new Notice(`Attached: ${attachment.name}`);
+				this.renderInputStateBar();
+			} else {
+				new Notice('Failed to attach file');
+			}
+		}
+	}
+
+	/** Prompt user to select a file */
+	private promptForFile(files: string[]): Promise<string | null> {
+		return new Promise((resolve) => {
+			const modal = new Modal(this.app);
+			modal.titleEl.setText('Attach File');
+
+			const inputContainer = modal.contentEl.createDiv();
+			const input = inputContainer.createEl('input', {
+				type: 'text',
+				placeholder: 'Type to search files...',
+				cls: 'agentlink-file-input',
+			});
+			input.style.width = '100%';
+			input.focus();
+
+			const listContainer = modal.contentEl.createDiv({
+				cls: 'agentlink-file-list',
+			});
+			listContainer.style.maxHeight = '300px';
+			listContainer.style.overflowY = 'auto';
+			listContainer.style.marginTop = '0.5rem';
+
+			const renderList = (filter: string) => {
+				listContainer.empty();
+				const filtered = files.filter(f =>
+					f.toLowerCase().includes(filter.toLowerCase())
+				).slice(0, 20);
+
+				for (const file of filtered) {
+					const item = listContainer.createEl('button', {
+						text: file,
+						cls: 'agentlink-file-item',
+					});
+					item.style.width = '100%';
+					item.style.textAlign = 'left';
+					item.style.padding = '0.25rem 0.4rem';
+					item.style.border = 'none';
+					item.style.background = 'transparent';
+					item.style.cursor = 'pointer';
+					item.style.fontSize = '0.8rem';
+					item.addEventListener('click', () => {
+						modal.close();
+						resolve(file);
+					});
+					item.addEventListener('mouseenter', () => {
+						item.style.background = 'var(--background-modifier-hover)';
+					});
+					item.addEventListener('mouseleave', () => {
+						item.style.background = 'transparent';
+					});
+				}
+			};
+
+			input.addEventListener('input', () => renderList(input.value));
+			renderList('');
+
+			const btnContainer = modal.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
+			btnContainer.style.display = 'flex';
+			btnContainer.style.gap = '0.5em';
+			btnContainer.style.marginTop = '1em';
+			btnContainer.style.justifyContent = 'flex-end';
+
+			new ButtonComponent(btnContainer)
+				.setButtonText('Cancel')
+				.onClick(() => {
+					modal.close();
+					resolve(null);
+				});
+
+			modal.open();
+		});
+	}
+
+	/** Handle attach selection button click */
+	private handleAttachSelection(): void {
+		const editor = this.app.workspace.activeEditor?.editor;
+		if (!editor) {
+			new Notice('No active editor');
+			return;
+		}
+
+		const selection = editor.getSelection();
+		if (!selection) {
+			new Notice('No text selected');
+			return;
+		}
+
+		const activeFile = this.app.workspace.getActiveFile();
+		const attachment = this.contextService.createSelectionAttachment(
+			selection,
+			activeFile?.name
+		);
+
+		if (attachment) {
+			new Notice(`Attached selection (${attachment.size} bytes)`);
+			this.renderInputStateBar();
+		}
+	}
+
+	/** Handle attach current note button click */
+	private async handleAttachCurrentNote(): Promise<void> {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) {
+			new Notice('No active note');
+			return;
+		}
+
+		const attachment = await this.contextService.createFileAttachment(activeFile.path);
+		if (attachment) {
+			new Notice(`Attached: ${attachment.name}`);
+			this.renderInputStateBar();
+		} else {
+			new Notice('Failed to attach note');
 		}
 	}
 }
