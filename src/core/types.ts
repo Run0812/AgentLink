@@ -113,6 +113,26 @@ export interface SessionConfigState {
 	configOptions: ConfigOption[];
 }
 
+export interface ContextUsageItem {
+	label: string;
+	usedTokens: number;
+}
+
+export interface ContextUsageSection {
+	title: string;
+	items: ContextUsageItem[];
+}
+
+export interface ContextUsageState {
+	usedTokens: number;
+	maxTokens?: number;
+	percentage?: number;
+	source: 'acp' | 'estimated';
+	summary?: string;
+	sections?: ContextUsageSection[];
+	lastUpdatedAt?: number;
+}
+
 // ── Message types ──────────────────────────────────────────────────────
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'error' | 'status' | 'tool_call' | 'file_edit' | 'thinking';
@@ -483,6 +503,8 @@ export interface AgentAdapter {
 	getSessionModes?(): SessionModeOption[];
 	/** Prepare the backend session before the first prompt or when starting a fresh chat. */
 	prepareSession?(options?: { reset?: boolean }): Promise<void>;
+	/** Return context window usage information when available. */
+	getContextUsage?(): ContextUsageState | null;
 	
 	/** 
 	 * Get available skills from the agent.

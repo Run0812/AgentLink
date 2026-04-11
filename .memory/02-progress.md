@@ -9,6 +9,103 @@
 
 ---
 
+## 2026-04-11 - 修复通用 dropdown 文本裁切与外部点击关闭
+
+**实现范围**:
+- 通用 config dropdown 排版
+- dropdown 外部点击关闭
+
+**完成内容**:
+- 通用 config dropdown 选项改为稳定的纵向布局，增加统一 `line-height` 和最小高度，修复描述文字显示不全
+- `chat-view` 中 model / thinking dropdown 项同步增加最小高度和行高，避免两行内容被压缩
+- `ConfigToolbar` 新增 outside click 监听，dropdown 展开后点击外部区域会自动关闭
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/components/config-toolbar.tsx`
+- `src/ui/chat-view.ts`
+
+---
+
+## 2026-04-11 - 收敛底部工具栏 dropdown 尺寸与溢出显示
+
+**实现范围**:
+- 底部工具栏按钮尺寸
+- dropdown 宽度区间
+- 长文本溢出处理
+
+**完成内容**:
+- 底部 agent、model 和通用 config 按钮统一为相同高度，并增加统一的最小/最大宽度区间
+- 底部相关 dropdown 统一最小/最大宽度区间，避免不同菜单的视觉尺寸飘忽
+- 长模型名、agent 名和说明文字改为单行省略，修复文本超出边框的问题
+- 保留不同按钮按内容伸缩的能力，但限制在一致区间内，避免过窄或过宽
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/components/config-toolbar.tsx`
+
+---
+
+## 2026-04-11 - 增加 ACP 连接缓存与切换后立即预连接
+
+**实现范围**:
+- Agent 切换建连时机
+- ACP adapter 缓存
+- 过期回收设置
+
+**完成内容**:
+- `ChatView.setAdapter()` 现在在切换到新 agent 后会立即调用 `prepareSession()`，不再等首条消息才建连
+- 移除聊天窗口切换 agent 时对旧 adapter 的立即断开逻辑，避免无谓重连
+- 新增 `AcpAdapterPool`，按 backend id 复用 ACP adapter，并在配置变更时自动替换旧实例
+- 插件设置新增 `ACP connection cache TTL (minutes)`，可配置失活 ACP 连接的保留时长，`0` 表示禁用缓存
+- 插件层增加周期性过期回收和 `onunload()` 全量断连，避免缓存泄漏
+
+**测试结果**:
+- 新增 adapter pool 单测，覆盖连接复用、配置变更重建、TTL 过期回收
+
+**相关文件**:
+- `src/main.ts`
+- `src/ui/chat-view.ts`
+- `src/settings/settings.ts`
+- `src/settings/settings-tab.ts`
+- `src/services/acp-adapter-pool.ts`
+- `test/unit/acp-adapter-pool.test.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-11 - 增加 ACP 上下文使用状态指示器
+
+**实现范围**:
+- 底部工具栏上下文使用 UI
+- ACP usage 数据接收
+
+**完成内容**:
+- 在底部工具栏增加小型环形上下文使用指示器，位置符合 `05-ui-ux.md`
+- 仅当 agent 返回可计算百分比的上下文用量数据时才显示，不做本地估算占位
+- 支持接收非稳定 `usage_update` / usage 响应字段，并在悬停时显示 token 明细
+- 无可用数据时完全隐藏该 UI，避免误导
+
+**测试结果**:
+- 新增 ACP context usage 单测，覆盖 `used/max` 解析与明细展示数据结构
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/ui/chat-view.ts`
+- `src/core/types.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+
+---
+
 ## 2026-04-10 - 补齐 ACP 文件系统与权限能力
 
 **实现范围**:

@@ -29,6 +29,7 @@ import {
 	AvailableCommand,
 	PlanEntry,
 	SessionModeOption,
+	ContextUsageState,
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
@@ -142,6 +143,11 @@ class AgentLinkAcpClient implements acp.Client {
 			case 'config_option_update':
 				console.log('[ACP Client] Config option update:', update.configOptions?.length ?? 0);
 				this.adapter.handleConfigOptionUpdate(update.configOptions);
+				break;
+
+			case 'usage_update':
+				console.log('[ACP Client] Usage update received');
+				this.adapter.handleContextUsageUpdate(update as unknown);
 				break;
 
 			case 'user_message_chunk':
@@ -299,6 +305,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private availableCommands: AvailableCommand[] = [];
 	private plan: PlanEntry[] = [];
 	private currentMode: string | null = null;
+	private contextUsage: ContextUsageState | null = null;
 	private sessionStateListeners = new Set<() => void>();
 	
 	// Streaming handlers
@@ -443,6 +450,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 			console.log('[ACP Adapter] Prompt response received!');
 			console.log('[ACP Adapter] Stop reason:', response.stopReason);
+			this.handlePromptUsage(response as unknown);
 
 			// 发送完整的响应
 			const fullText = this.responseBuffer.join('');
@@ -554,6 +562,10 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	getSessionModes(): SessionModeOption[] {
 		return this.sessionModes;
+	}
+
+	getContextUsage(): ContextUsageState | null {
+		return this.contextUsage;
 	}
 
 	async setConfigOption(configId: string, value: string | boolean): Promise<ConfigOption[]> {
@@ -765,6 +777,21 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			status: entry.status,
 		}));
 		console.log('[ACP Adapter] Plan updated:', this.plan.map((entry) => `${entry.status}:${entry.content}`).join(' | ') || '(none)');
+		this.emitSessionStateChange();
+	}
+
+	handleContextUsageUpdate(update: unknown): void {
+		const parsed = this.parseContextUsage(update);
+		if (!parsed) {
+			return;
+		}
+
+		this.contextUsage = parsed;
+		console.log(
+			'[ACP Adapter] Context usage updated:',
+			`${parsed.usedTokens}/${parsed.maxTokens ?? '?'}`,
+			parsed.source,
+		);
 		this.emitSessionStateChange();
 	}
 
@@ -1306,6 +1333,138 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		return configOptions.map((option) => `${option.id}=${String(option.currentValue)}`).join(', ') || '(none)';
 	}
 
+	private handlePromptUsage(response: unknown): void {
+		const parsed = this.parseContextUsage(response);
+		if (!parsed) {
+			return;
+		}
+
+		this.contextUsage = {
+			...this.contextUsage,
+			...parsed,
+			maxTokens: parsed.maxTokens ?? this.contextUsage?.maxTokens,
+			percentage:
+				parsed.maxTokens ?? this.contextUsage?.maxTokens
+					? Math.max(
+						0,
+						Math.min(
+							100,
+							Math.round(
+								(parsed.usedTokens / ((parsed.maxTokens ?? this.contextUsage?.maxTokens) as number)) * 100,
+							),
+						),
+					  )
+					: undefined,
+		};
+		this.emitSessionStateChange();
+	}
+
+	private parseContextUsage(input: unknown): ContextUsageState | null {
+		if (!input || typeof input !== 'object') {
+			return null;
+		}
+
+		const record = input as Record<string, unknown>;
+		const usageRecord = this.asRecord(record.usage) ?? record;
+		const usedTokens = this.readNumberField(usageRecord, ['used', 'usedTokens', 'totalTokens', 'total_tokens']);
+		const maxTokens =
+			this.readNumberField(usageRecord, ['size', 'maxTokens', 'max_tokens', 'limit']) ??
+			this.readNestedNumberField(usageRecord, 'contextWindow', ['size', 'maxTokens', 'limit']);
+
+		if (usedTokens === null && maxTokens === null) {
+			return null;
+		}
+
+		const sections = this.parseUsageSections(usageRecord);
+		return {
+			usedTokens: usedTokens ?? this.contextUsage?.usedTokens ?? 0,
+			maxTokens: maxTokens ?? undefined,
+			percentage:
+				usedTokens !== null && maxTokens && maxTokens > 0
+					? Math.max(0, Math.min(100, Math.round((usedTokens / maxTokens) * 100)))
+					: undefined,
+			source: 'acp',
+			summary: typeof usageRecord.summary === 'string' ? usageRecord.summary : undefined,
+			sections,
+			lastUpdatedAt: Date.now(),
+		};
+	}
+
+	private parseUsageSections(record: Record<string, unknown>): ContextUsageState['sections'] {
+		const rawSections = Array.isArray(record.sections)
+			? record.sections
+			: Array.isArray(record.breakdown)
+				? record.breakdown
+				: null;
+
+		if (!rawSections) {
+			return undefined;
+		}
+
+		const sections = rawSections
+			.map((section) => {
+				const sectionRecord = this.asRecord(section);
+				if (!sectionRecord || typeof sectionRecord.title !== 'string' || !Array.isArray(sectionRecord.items)) {
+					return null;
+				}
+
+				const items = sectionRecord.items
+					.map((item) => {
+						const itemRecord = this.asRecord(item);
+						if (!itemRecord || typeof itemRecord.label !== 'string') {
+							return null;
+						}
+
+						const used = this.readNumberField(itemRecord, ['usedTokens', 'used', 'tokens']);
+						if (used === null) {
+							return null;
+						}
+
+						return {
+							label: itemRecord.label,
+							usedTokens: used,
+						};
+					})
+					.filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+				if (items.length === 0) {
+					return null;
+				}
+
+				return {
+					title: sectionRecord.title,
+					items,
+				};
+			})
+			.filter((section): section is NonNullable<typeof section> => Boolean(section));
+
+		return sections.length > 0 ? sections : undefined;
+	}
+
+	private asRecord(value: unknown): Record<string, unknown> | null {
+		return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+	}
+
+	private readNumberField(record: Record<string, unknown>, keys: string[]): number | null {
+		for (const key of keys) {
+			const value = record[key];
+			if (typeof value === 'number' && Number.isFinite(value)) {
+				return value;
+			}
+		}
+
+		return null;
+	}
+
+	private readNestedNumberField(record: Record<string, unknown>, key: string, nestedKeys: string[]): number | null {
+		const nested = this.asRecord(record[key]);
+		if (!nested) {
+			return null;
+		}
+
+		return this.readNumberField(nested, nestedKeys);
+	}
+
 	private setState(state: AgentStatusState): void {
 		this.state = state;
 		this.emitSessionStateChange();
@@ -1318,6 +1477,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.availableCommands = [];
 		this.plan = [];
 		this.currentMode = null;
+		this.contextUsage = null;
 	}
 
 	private emitSessionStateChange(): void {

@@ -45,6 +45,8 @@ export interface AgentLinkSettings {
   showThinking: boolean;
   /** Thinking intensity mode: none/quick/balanced/deep */
   thinkingMode: 'none' | 'quick' | 'balanced' | 'deep';
+  /** Keep inactive ACP adapters alive for this many minutes before cleanup. 0 disables caching. */
+  acpConnectionCacheTtlMinutes: number;
 }
 
 /** Create preset Kimi Code backend config */
@@ -94,6 +96,7 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
   autoConfirmEdit: false,
   showThinking: true,
   thinkingMode: 'balanced',
+  acpConnectionCacheTtlMinutes: 10,
 };
 
 /**

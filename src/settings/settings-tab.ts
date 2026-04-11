@@ -475,6 +475,19 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName('ACP connection cache TTL (minutes)')
+			.setDesc('Keep inactive ACP agents connected for this many minutes after switching. Set to 0 to disable caching.')
+			.addText((t) =>
+				t.setValue(String(this.plugin.settings.acpConnectionCacheTtlMinutes)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					if (!isNaN(n) && n >= 0) {
+						this.plugin.settings.acpConnectionCacheTtlMinutes = n;
+						await this.plugin.saveSettings();
+					}
+				})
+			);
 	}
 
 	// ── Tool Call Settings ───────────────────────────────────────────────

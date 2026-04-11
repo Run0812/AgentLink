@@ -10,7 +10,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
-import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, PlanEntry } from '../core/types';
+import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, PlanEntry, ContextUsageState } from '../core/types';
 import { h, render } from 'preact';
 import { ConfigToolbar } from './components/config-toolbar';
 import { CancellationError } from '../core/errors';
@@ -28,6 +28,11 @@ import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
 export class ChatView extends ItemView {
+	private static readonly TOOLBAR_BUTTON_MIN_WIDTH = '108px';
+	private static readonly TOOLBAR_BUTTON_MAX_WIDTH = '156px';
+	private static readonly TOOLBAR_DROPDOWN_MIN_WIDTH = '220px';
+	private static readonly TOOLBAR_DROPDOWN_MAX_WIDTH = 'min(280px, calc(100vw - 32px))';
+
 	private adapter: AgentAdapter | null = null;
 	private session = new SessionStore();
 	private settings: AgentLinkSettings;
@@ -65,6 +70,10 @@ export class ChatView extends ItemView {
 	private statusLed!: HTMLElement;
 	private agentSelectorBtn!: HTMLButtonElement; // Agent 选择按钮
 	private modelSelectorBtn!: HTMLButtonElement; // 模型选择按钮
+	private contextUsageContainer!: HTMLElement;
+	private contextUsageButton!: HTMLButtonElement;
+	private contextUsageTooltip!: HTMLElement;
+	private contextUsageRing!: HTMLElement;
 	private quickConfigBtn!: HTMLButtonElement; // 快捷配置按钮
 
 	// ── Input Area ─────────────────────────────────────────────────────
@@ -128,6 +137,7 @@ export class ChatView extends ItemView {
 
 	/** Called by the plugin when settings change. */
 	setAdapter(adapter: AgentAdapter): void {
+		const previousAdapter = this.adapter;
 		this.detachSessionStateListener?.();
 		this.adapter = adapter;
 		const acpAdapter = adapter as AcpBridgeAdapter & { subscribeSessionState?: (listener: () => void) => () => void };
@@ -138,6 +148,9 @@ export class ChatView extends ItemView {
 		});
 		this.refreshStatus();
 		void this.refreshSessionFeatures();
+		if (previousAdapter !== adapter) {
+			void this.prepareAdapterSession();
+		}
 	}
 
 	refreshSettings(): void {
@@ -403,29 +416,17 @@ export class ChatView extends ItemView {
 		const agentContainer = this.bottomToolbar.createDiv();
 		agentContainer.style.position = 'relative';
 		this.agentSelectorBtn = agentContainer.createEl('button');
-		this.agentSelectorBtn.style.display = 'flex';
-		this.agentSelectorBtn.style.alignItems = 'center';
-		this.agentSelectorBtn.style.gap = '0.25rem';
-		this.agentSelectorBtn.style.padding = '0.25rem 0.4rem';
-		this.agentSelectorBtn.style.background = 'transparent';
-		this.agentSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
-		this.agentSelectorBtn.style.borderRadius = '4px';
-		this.agentSelectorBtn.style.cursor = 'pointer';
-		this.agentSelectorBtn.style.fontSize = '0.75rem';
-		this.agentSelectorBtn.style.color = 'var(--text-normal)';
-		this.agentSelectorBtn.style.whiteSpace = 'nowrap';
-		this.agentSelectorBtn.style.height = '24px';
+		this.applyToolbarSelectorButtonStyle(this.agentSelectorBtn, 'var(--text-normal)');
 		
 		const agentText = this.agentSelectorBtn.createEl('span');
 		agentText.textContent = 'Agent'; // Will be updated by refreshStatus
-		agentText.style.maxWidth = '100px';
-		agentText.style.overflow = 'hidden';
-		agentText.style.textOverflow = 'ellipsis';
-		agentText.style.whiteSpace = 'nowrap';
+		agentText.style.flex = '1';
+		this.applySingleLineEllipsis(agentText, '0.75rem');
 		const agentArrow = this.agentSelectorBtn.createEl('span');
 		agentArrow.innerHTML = '▾';
 		agentArrow.style.fontSize = '0.6rem';
 		agentArrow.style.opacity = '0.6';
+		agentArrow.style.flexShrink = '0';
 		
 		// Agent dropdown (opens upward)
 		const agentDropdown = agentContainer.createDiv();
@@ -442,29 +443,17 @@ export class ChatView extends ItemView {
 		const modelContainer = this.bottomToolbar.createDiv();
 		modelContainer.style.position = 'relative';
 		this.modelSelectorBtn = modelContainer.createEl('button');
-		this.modelSelectorBtn.style.display = 'flex';
-		this.modelSelectorBtn.style.alignItems = 'center';
-		this.modelSelectorBtn.style.gap = '0.25rem';
-		this.modelSelectorBtn.style.padding = '0.25rem 0.4rem';
-		this.modelSelectorBtn.style.background = 'transparent';
-		this.modelSelectorBtn.style.border = '1px solid var(--background-modifier-border)';
-		this.modelSelectorBtn.style.borderRadius = '4px';
-		this.modelSelectorBtn.style.cursor = 'pointer';
-		this.modelSelectorBtn.style.fontSize = '0.75rem';
-		this.modelSelectorBtn.style.color = 'var(--text-muted)';
-		this.modelSelectorBtn.style.whiteSpace = 'nowrap';
-		this.modelSelectorBtn.style.height = '24px';
+		this.applyToolbarSelectorButtonStyle(this.modelSelectorBtn, 'var(--text-muted)');
 		this.modelSelectorBtn.style.display = 'none';
 		
 		const modelText = this.modelSelectorBtn.createEl('span', { text: 'Model' });
-		modelText.style.maxWidth = '80px';
-		modelText.style.overflow = 'hidden';
-		modelText.style.textOverflow = 'ellipsis';
-		modelText.style.whiteSpace = 'nowrap';
+		modelText.style.flex = '1';
+		this.applySingleLineEllipsis(modelText, '0.75rem');
 		const modelArrow = this.modelSelectorBtn.createEl('span');
 		modelArrow.innerHTML = '▾';
 		modelArrow.style.fontSize = '0.6rem';
 		modelArrow.style.opacity = '0.6';
+		modelArrow.style.flexShrink = '0';
 		
 		// Model dropdown (opens upward)
 		const modelDropdown = modelContainer.createDiv();
@@ -479,6 +468,73 @@ export class ChatView extends ItemView {
 			if (!isOpen) this.renderModelDropdown(modelDropdown);
 		});
 		document.addEventListener('click', () => modelDropdown.style.display = 'none');
+
+		const contextUsageContainer = this.bottomToolbar.createDiv();
+		contextUsageContainer.style.position = 'relative';
+		contextUsageContainer.style.display = 'none';
+		contextUsageContainer.style.alignItems = 'center';
+		this.contextUsageContainer = contextUsageContainer;
+
+		this.contextUsageButton = contextUsageContainer.createEl('button');
+		this.contextUsageButton.type = 'button';
+		this.contextUsageButton.style.width = '22px';
+		this.contextUsageButton.style.height = '22px';
+		this.contextUsageButton.style.padding = '0';
+		this.contextUsageButton.style.border = 'none';
+		this.contextUsageButton.style.background = 'transparent';
+		this.contextUsageButton.style.cursor = 'default';
+		this.contextUsageButton.style.display = 'flex';
+		this.contextUsageButton.style.alignItems = 'center';
+		this.contextUsageButton.style.justifyContent = 'center';
+		this.contextUsageButton.style.borderRadius = '999px';
+		this.contextUsageButton.setAttribute('aria-label', 'Context usage');
+
+		this.contextUsageRing = this.contextUsageButton.createDiv();
+		this.contextUsageRing.style.width = '16px';
+		this.contextUsageRing.style.height = '16px';
+		this.contextUsageRing.style.borderRadius = '999px';
+		this.contextUsageRing.style.background = 'var(--background-modifier-border)';
+		this.contextUsageRing.style.position = 'relative';
+		this.contextUsageRing.style.boxSizing = 'border-box';
+
+		const ringInner = this.contextUsageRing.createDiv();
+		ringInner.style.position = 'absolute';
+		ringInner.style.inset = '3px';
+		ringInner.style.borderRadius = '999px';
+		ringInner.style.background = 'var(--background-secondary)';
+		ringInner.style.border = '1px solid var(--background-modifier-border)';
+
+		this.contextUsageTooltip = contextUsageContainer.createDiv();
+		this.contextUsageTooltip.style.display = 'none';
+		this.contextUsageTooltip.style.position = 'absolute';
+		this.contextUsageTooltip.style.bottom = '100%';
+		this.contextUsageTooltip.style.left = '0';
+		this.contextUsageTooltip.style.zIndex = '1000';
+		this.contextUsageTooltip.style.minWidth = '220px';
+		this.contextUsageTooltip.style.maxWidth = '280px';
+		this.contextUsageTooltip.style.padding = '0.55rem 0.65rem';
+		this.contextUsageTooltip.style.marginBottom = '0.4rem';
+		this.contextUsageTooltip.style.background = 'var(--background-primary)';
+		this.contextUsageTooltip.style.border = '1px solid var(--background-modifier-border)';
+		this.contextUsageTooltip.style.borderRadius = '6px';
+		this.contextUsageTooltip.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.18)';
+
+		contextUsageContainer.addEventListener('mouseenter', () => {
+			if (this.contextUsageContainer.style.display !== 'none') {
+				this.contextUsageTooltip.style.display = 'block';
+			}
+		});
+		contextUsageContainer.addEventListener('mouseleave', () => {
+			this.contextUsageTooltip.style.display = 'none';
+		});
+		this.contextUsageButton.addEventListener('focus', () => {
+			if (this.contextUsageContainer.style.display !== 'none') {
+				this.contextUsageTooltip.style.display = 'block';
+			}
+		});
+		this.contextUsageButton.addEventListener('blur', () => {
+			this.contextUsageTooltip.style.display = 'none';
+		});
 
 		// Container for dynamic configOptions
 		this.configButtonsContainer = this.bottomToolbar.createDiv();
@@ -537,6 +593,86 @@ export class ChatView extends ItemView {
 		this.refreshStatus();
 	}
 
+	private applyToolbarSelectorButtonStyle(button: HTMLButtonElement, color: string): void {
+		button.style.display = 'flex';
+		button.style.alignItems = 'center';
+		button.style.justifyContent = 'space-between';
+		button.style.gap = '0.25rem';
+		button.style.minWidth = ChatView.TOOLBAR_BUTTON_MIN_WIDTH;
+		button.style.maxWidth = ChatView.TOOLBAR_BUTTON_MAX_WIDTH;
+		button.style.height = '24px';
+		button.style.padding = '0.25rem 0.45rem';
+		button.style.boxSizing = 'border-box';
+		button.style.background = 'transparent';
+		button.style.border = '1px solid var(--background-modifier-border)';
+		button.style.borderRadius = '4px';
+		button.style.cursor = 'pointer';
+		button.style.fontSize = '0.75rem';
+		button.style.color = color;
+		button.style.whiteSpace = 'nowrap';
+		button.style.overflow = 'hidden';
+		button.style.flexShrink = '0';
+	}
+
+	private applyToolbarDropdownStyle(
+		container: HTMLElement,
+		alignment: 'left' | 'right' = 'left',
+		maxHeight?: string,
+	): void {
+		container.style.display = 'block';
+		container.style.position = 'absolute';
+		container.style.bottom = '100%';
+		container.style.left = alignment === 'left' ? '0' : 'auto';
+		container.style.right = alignment === 'right' ? '0' : 'auto';
+		container.style.zIndex = '1000';
+		container.style.minWidth = ChatView.TOOLBAR_DROPDOWN_MIN_WIDTH;
+		container.style.maxWidth = ChatView.TOOLBAR_DROPDOWN_MAX_WIDTH;
+		container.style.boxSizing = 'border-box';
+		container.style.padding = '0.3rem';
+		container.style.background = 'var(--background-primary)';
+		container.style.border = '1px solid var(--background-modifier-border)';
+		container.style.borderRadius = '6px';
+		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
+		container.style.marginBottom = '0.3rem';
+		container.style.overflowX = 'hidden';
+		if (maxHeight) {
+			container.style.maxHeight = maxHeight;
+			container.style.overflowY = 'auto';
+		} else {
+			container.style.removeProperty('max-height');
+			container.style.overflowY = 'visible';
+		}
+	}
+
+	private applyToolbarDropdownHeaderStyle(header: HTMLElement): void {
+		header.style.fontSize = '0.7rem';
+		header.style.color = 'var(--text-muted)';
+		header.style.padding = '0.25rem 0.4rem';
+		header.style.marginBottom = '0.2rem';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		header.style.whiteSpace = 'nowrap';
+		header.style.overflow = 'hidden';
+		header.style.textOverflow = 'ellipsis';
+	}
+
+	private applyToolbarDropdownItemStyle(item: HTMLButtonElement): void {
+		item.style.width = '100%';
+		item.style.boxSizing = 'border-box';
+		item.style.overflow = 'hidden';
+	}
+
+	private applySingleLineEllipsis(element: HTMLElement, fontSize: string, color?: string): void {
+		element.style.minWidth = '0';
+		element.style.fontSize = fontSize;
+		element.style.lineHeight = '1.3';
+		element.style.overflow = 'hidden';
+		element.style.textOverflow = 'ellipsis';
+		element.style.whiteSpace = 'nowrap';
+		if (color) {
+			element.style.color = color;
+		}
+	}
+
 	// ── Resize Handle ────────────────────────────────────────────────────
 
 	private setupResizeHandle(): void {
@@ -576,6 +712,7 @@ export class ChatView extends ItemView {
 	private async refreshSessionFeatures(): Promise<void> {
 		await this.loadConfigOptions();
 		this.updateModelSelector();
+		this.renderContextUsage();
 		this.renderPlanPanel();
 	}
 
@@ -655,6 +792,83 @@ export class ChatView extends ItemView {
 
 		const current = modelOption.options.find((item) => item.value === modelOption.currentValue);
 		labelEl.textContent = current?.name ?? modelOption.name;
+	}
+
+	private renderContextUsage(): void {
+		if (!this.contextUsageContainer || !this.contextUsageRing || !this.contextUsageTooltip) {
+			return;
+		}
+
+		const usage = this.adapter?.getContextUsage?.() ?? null;
+		if (!usage || usage.maxTokens === undefined || usage.percentage === undefined) {
+			this.contextUsageContainer.style.display = 'none';
+			this.contextUsageTooltip.style.display = 'none';
+			this.contextUsageTooltip.empty();
+			this.contextUsageButton.removeAttribute('title');
+			return;
+		}
+
+		this.contextUsageContainer.style.display = 'flex';
+		const percentage = Math.max(0, Math.min(100, usage.percentage));
+		this.contextUsageRing.style.background = `conic-gradient(var(--interactive-accent) 0deg ${percentage * 3.6}deg, var(--background-modifier-border) ${percentage * 3.6}deg 360deg)`;
+		this.contextUsageButton.title = `${this.formatCompactTokens(usage.usedTokens)} / ${this.formatCompactTokens(usage.maxTokens)} tokens (${percentage}%)`;
+
+		this.contextUsageTooltip.empty();
+		this.renderContextUsageTooltip(this.contextUsageTooltip, usage);
+	}
+
+	private renderContextUsageTooltip(container: HTMLElement, usage: ContextUsageState): void {
+		const header = container.createEl('div', { text: 'Context window' });
+		header.style.fontSize = '0.8rem';
+		header.style.fontWeight = '600';
+		header.style.color = 'var(--text-normal)';
+		header.style.marginBottom = '0.2rem';
+
+		const summary = container.createEl('div', {
+			text: `${this.formatCompactTokens(usage.usedTokens)} / ${this.formatCompactTokens(usage.maxTokens ?? 0)} tokens · ${usage.percentage ?? 0}%`,
+		});
+		summary.style.fontSize = '0.72rem';
+		summary.style.color = 'var(--text-muted)';
+		summary.style.marginBottom = usage.sections?.length ? '0.55rem' : '0';
+
+		if (usage.summary) {
+			const note = container.createEl('div', { text: usage.summary });
+			note.style.fontSize = '0.72rem';
+			note.style.color = 'var(--text-muted)';
+			note.style.marginBottom = usage.sections?.length ? '0.5rem' : '0';
+		}
+
+		for (const section of usage.sections ?? []) {
+			const title = container.createEl('div', { text: section.title });
+			title.style.fontSize = '0.72rem';
+			title.style.fontWeight = '600';
+			title.style.color = 'var(--text-normal)';
+			title.style.marginTop = '0.35rem';
+			title.style.marginBottom = '0.2rem';
+
+			for (const item of section.items) {
+				const row = container.createDiv();
+				row.style.display = 'flex';
+				row.style.alignItems = 'center';
+				row.style.justifyContent = 'space-between';
+				row.style.gap = '0.8rem';
+				row.style.fontSize = '0.72rem';
+				row.style.color = 'var(--text-muted)';
+
+				row.createEl('span', { text: item.label });
+				row.createEl('span', { text: this.formatCompactTokens(item.usedTokens) });
+			}
+		}
+	}
+
+	private formatCompactTokens(tokens: number): string {
+		if (tokens >= 1_000_000) {
+			return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+		}
+		if (tokens >= 1_000) {
+			return `${(tokens / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+		}
+		return `${tokens}`;
 	}
 
 	private renderPlanPanel(): void {
@@ -1584,28 +1798,10 @@ export class ChatView extends ItemView {
 		const activeBackend = getActiveBackendConfig(this.settings);
 
 		container.empty();
-		container.style.display = 'block';
-		container.style.position = 'absolute';
-		container.style.bottom = '100%';
-		container.style.left = '0';
-		container.style.zIndex = '1000';
-		container.style.minWidth = '200px';
-		container.style.maxWidth = '280px';
-		container.style.maxHeight = '300px';
-		container.style.overflowY = 'auto';
-		container.style.padding = '0.3rem';
-		container.style.background = 'var(--background-primary)';
-		container.style.border = '1px solid var(--background-modifier-border)';
-		container.style.borderRadius = '6px';
-		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
-		container.style.marginBottom = '0.3rem';
+		this.applyToolbarDropdownStyle(container, 'left', '300px');
 
 		const header = container.createEl('div', { text: 'Select Agent' });
-		header.style.fontSize = '0.7rem';
-		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.25rem 0.4rem';
-		header.style.marginBottom = '0.2rem';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.applyToolbarDropdownHeaderStyle(header);
 
 		// Show message if no enabled backends
 		if (backends.length === 0) {
@@ -1634,14 +1830,16 @@ export class ChatView extends ItemView {
 			item.style.color = 'var(--text-normal)';
 			item.style.textAlign = 'left';
 			item.style.cursor = 'pointer';
+			this.applyToolbarDropdownItemStyle(item);
 
 			const icon = item.createEl('span');
 			icon.innerHTML = '🤖';
 			icon.style.fontSize = '0.8rem';
+			icon.style.flexShrink = '0';
 
 			const name = item.createEl('span', { text: backend.name });
 			name.style.flex = '1';
-			name.style.fontSize = '0.75rem';
+			this.applySingleLineEllipsis(name, '0.75rem');
 
 			if (backend.id === activeBackend?.id) {
 				const check = item.createEl('span');
@@ -1649,28 +1847,15 @@ export class ChatView extends ItemView {
 				check.style.color = 'var(--interactive-accent)';
 				check.style.fontWeight = 'bold';
 				check.style.fontSize = '0.75rem';
+				check.style.flexShrink = '0';
 			}
 
 			item.addEventListener('click', async () => {
 				if (backend.id !== this.settings.activeBackendId) {
-					// Disconnect from current adapter if connected
-					if (this.adapter?.disconnect) {
-						this.updateLedState('connecting');
-						try {
-							await this.adapter.disconnect();
-						} catch (error) {
-							console.error('[ChatView] Error disconnecting from current adapter:', error);
-						}
-					}
-					
 					// Update settings
 					this.settings.activeBackendId = backend.id;
-					await this.onSettingsSave();
-					
-					// Update LED to connecting state
 					this.updateLedState('connecting');
-					
-					// Refresh status to reflect the change
+					await this.onSettingsSave();
 					this.refreshStatus();
 					new Notice(`Switched to ${backend.name}`);
 				}
@@ -1688,33 +1873,21 @@ export class ChatView extends ItemView {
 		}
 
 		container.empty();
-		container.style.display = 'block';
-		container.style.position = 'absolute';
-		container.style.bottom = '100%';
-		container.style.left = '0';
-		container.style.zIndex = '1000';
-		container.style.minWidth = '160px';
-		container.style.maxWidth = '240px';
-		container.style.padding = '0.3rem';
-		container.style.background = 'var(--background-primary)';
-		container.style.border = '1px solid var(--background-modifier-border)';
-		container.style.borderRadius = '6px';
-		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
-		container.style.marginBottom = '0.3rem';
+		this.applyToolbarDropdownStyle(container);
 
 		const header = container.createEl('div', { text: 'Model' });
-		header.style.fontSize = '0.7rem';
-		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.25rem 0.4rem';
-		header.style.marginBottom = '0.2rem';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.applyToolbarDropdownHeaderStyle(header);
 
 		for (const model of modelOption.options) {
 			const item = container.createEl('button');
 			item.type = 'button';
 			item.style.width = '100%';
-			item.style.display = 'block';
-			item.style.padding = '0.35rem 0.4rem';
+			item.style.display = 'flex';
+			item.style.flexDirection = 'column';
+			item.style.alignItems = 'stretch';
+			item.style.gap = '0.12rem';
+			item.style.minHeight = '40px';
+			item.style.padding = '0.38rem 0.4rem';
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
@@ -1724,14 +1897,14 @@ export class ChatView extends ItemView {
 			item.style.color = 'var(--text-normal)';
 			item.style.textAlign = 'left';
 			item.style.cursor = 'pointer';
+			this.applyToolbarDropdownItemStyle(item);
 
 			const name = item.createEl('div', { text: model.name });
-			name.style.fontSize = '0.75rem';
 			name.style.fontWeight = '600';
+			this.applySingleLineEllipsis(name, '0.75rem');
 
 			const desc = item.createEl('div', { text: model.description ?? '' });
-			desc.style.fontSize = '0.7rem';
-			desc.style.color = 'var(--text-muted)';
+			this.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
 
 			item.addEventListener('click', async () => {
 				await this.handleConfigOptionChange(modelOption.id, model.value);
@@ -1750,25 +1923,10 @@ export class ChatView extends ItemView {
 		];
 
 		container.empty();
-		container.style.display = 'block';
-		container.style.position = 'absolute';
-		container.style.bottom = '100%';
-		container.style.right = '0';
-		container.style.zIndex = '1000';
-		container.style.minWidth = '140px';
-		container.style.padding = '0.3rem';
-		container.style.background = 'var(--background-primary)';
-		container.style.border = '1px solid var(--background-modifier-border)';
-		container.style.borderRadius = '6px';
-		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
-		container.style.marginBottom = '0.3rem';
+		this.applyToolbarDropdownStyle(container, 'right');
 
 		const header = container.createEl('div', { text: 'Thinking' });
-		header.style.fontSize = '0.7rem';
-		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.25rem 0.4rem';
-		header.style.marginBottom = '0.2rem';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.applyToolbarDropdownHeaderStyle(header);
 
 		for (const mode of modes) {
 			const item = container.createEl('button');
@@ -1776,7 +1934,10 @@ export class ChatView extends ItemView {
 			item.style.width = '100%';
 			item.style.display = 'flex';
 			item.style.flexDirection = 'column';
-			item.style.padding = '0.35rem 0.4rem';
+			item.style.alignItems = 'stretch';
+			item.style.gap = '0.12rem';
+			item.style.minHeight = '40px';
+			item.style.padding = '0.38rem 0.4rem';
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
 			item.style.borderRadius = '4px';
@@ -1786,15 +1947,18 @@ export class ChatView extends ItemView {
 			item.style.color = 'var(--text-normal)';
 			item.style.textAlign = 'left';
 			item.style.cursor = 'pointer';
+			this.applyToolbarDropdownItemStyle(item);
 
 			const nameRow = item.createEl('div');
 			nameRow.style.display = 'flex';
 			nameRow.style.alignItems = 'center';
 			nameRow.style.gap = '0.3rem';
+			nameRow.style.width = '100%';
 
 			const name = nameRow.createEl('span', { text: mode.name });
-			name.style.fontSize = '0.75rem';
 			name.style.fontWeight = '600';
+			name.style.flex = '1';
+			this.applySingleLineEllipsis(name, '0.75rem');
 
 			if (mode.id === this.settings.thinkingMode) {
 				const check = nameRow.createEl('span');
@@ -1802,11 +1966,11 @@ export class ChatView extends ItemView {
 				check.style.color = 'var(--interactive-accent)';
 				check.style.fontWeight = 'bold';
 				check.style.fontSize = '0.75rem';
+				check.style.flexShrink = '0';
 			}
 
 			const desc = item.createEl('div', { text: mode.desc });
-			desc.style.fontSize = '0.7rem';
-			desc.style.color = 'var(--text-muted)';
+			this.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
 
 			item.addEventListener('click', async () => {
 				this.settings.thinkingMode = mode.id;

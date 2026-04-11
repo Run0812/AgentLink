@@ -19,10 +19,14 @@ import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
 import { SessionManager } from './services/session-manager';
+import { AcpAdapterPool } from './services/acp-adapter-pool';
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
 	private adapter: AgentAdapter | null = null;
+	private readonly adapterPool = new AcpAdapterPool({
+		createAdapter: (config) => new AcpBridgeAdapter(config),
+	});
 	sessionManager!: SessionManager;
 
 	// ── Lifecycle ──────────────────────────────────────────────────────
@@ -42,7 +46,10 @@ export default class AgentLinkPlugin extends Plugin {
 			await this.syncRegistryData();
 		}
 		
-		this.buildAdapter();
+		await this.buildAdapter();
+		this.registerInterval(window.setInterval(() => {
+			void this.cleanupExpiredAdapters();
+		}, 60_000));
 
 		// Register the custom sidebar view
 		this.registerView(AGENTLINK_VIEW_TYPE, (leaf) => {
@@ -100,13 +107,7 @@ export default class AgentLinkPlugin extends Plugin {
 
 	async onunload(): Promise<void> {
 		logger.info('AgentLink: unloading plugin');
-		if (this.adapter) {
-			try {
-				await this.adapter.disconnect();
-			} catch {
-				// best-effort
-			}
-		}
+		await this.adapterPool.shutdownAll();
 		this.app.workspace.detachLeavesOfType(AGENTLINK_VIEW_TYPE);
 	}
 
@@ -198,11 +199,11 @@ export default class AgentLinkPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		logger.setDebug(this.settings.enableDebugLog);
 		await this.saveData(this.settings);
-		this.buildAdapter();
+		await this.buildAdapter();
 		// Refresh the open view
 		const view = this.getChatView();
-		if (view) {
-			view.setAdapter(this.adapter!);
+		if (view && this.adapter) {
+			view.setAdapter(this.adapter);
 			view.refreshSettings();
 		}
 	}
@@ -246,16 +247,12 @@ export default class AgentLinkPlugin extends Plugin {
 
 	// ── Adapter factory ────────────────────────────────────────────────
 
-	private buildAdapter(): void {
-		// Disconnect old adapter first
-		if (this.adapter) {
-			this.adapter.disconnect().catch(() => {});
-		}
-
+	private async buildAdapter(): Promise<void> {
 		const backendConfig = getActiveBackendConfig(this.settings);
 		if (!backendConfig) {
 			logger.warn('AgentLink: No active backend configured. Please add an ACP agent in settings.');
 			this.adapter = null;
+			await this.cleanupExpiredAdapters();
 			return;
 		}
 
@@ -267,7 +264,8 @@ export default class AgentLinkPlugin extends Plugin {
 					...backendConfig,
 					app: this.app,
 				};
-				this.adapter = new AcpBridgeAdapter(cfg);
+				this.adapter = await this.adapterPool.getOrCreate(cfg);
+				this.adapterPool.touch(backendConfig.id);
 				break;
 			}
 
@@ -276,6 +274,14 @@ export default class AgentLinkPlugin extends Plugin {
 				this.adapter = null;
 				break;
 		}
+
+		await this.cleanupExpiredAdapters();
+	}
+
+	private async cleanupExpiredAdapters(): Promise<void> {
+		const ttlMs = Math.max(0, this.settings.acpConnectionCacheTtlMinutes) * 60_000;
+		const validBackendIds = new Set(this.settings.backends.map((backend) => backend.id));
+		await this.adapterPool.evictExpired(ttlMs, this.settings.activeBackendId || null, validBackendIds);
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

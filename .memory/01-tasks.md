@@ -44,6 +44,7 @@
 #### UI 修复
 - [x] **LED 连接状态指示修复** - 首次打开和切换 agent 时正确显示连接状态
 - [x] **新对话预连接与命令预加载** - 新建对话或打开面板时主动准备 ACP session，避免黄灯长期闪烁并提前加载 `availableCommands`
+- [x] **切换 Agent 立即预连接** - 聊天窗口切换 agent 后立即开始建立 ACP 连接，不再等待首条消息
 - [ ] **输入框快捷键优化** - Enter 发送，Shift/Ctrl+Enter 换行
 - [ ] **@ 文件后附件显示** - 选择文件后自动添加到输入状态栏
 - [ ] **@current note 整合** - 将 Current note 按钮整合到 @ 菜单中
@@ -156,6 +157,7 @@
 | **ACP Slash Commands 动态支持** | 已完成 | `available_commands_update`、`input.hint`、Agent 命令插入与执行语义 |
 | **ACP client 能力补齐** | 部分完成 | 已补 `fs` 绝对路径适配、自动建目录、真实 permission 选择，并移除虚假的 `terminal: true`；认证流程待补 |
 | **新对话预热建连** | 已完成 | 打开面板/新建对话时主动建立 ACP session，并同步刷新 LED、commands、config |
+| **ACP 连接缓存与过期回收** | 已完成 | 按 backend 复用 ACP adapter/连接，切换后立即预热，并支持 TTL 配置清理失活连接 |
 | **移除 MockAdapter** | 待实现 | 简化代码库，只保留 ACP Bridge |
 | 引用标签渲染 | 待实现 | @ 和 / 以引用块样式显示 |
 

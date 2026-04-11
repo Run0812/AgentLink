@@ -401,5 +401,39 @@ describe('AcpBridgeAdapter', () => {
 				},
 			});
 		});
+
+		it('stores ACP context usage when the agent reports used and max tokens', () => {
+			adapter.handleContextUsageUpdate({
+				used: 2700,
+				size: 272000,
+				sections: [
+					{
+						title: 'System',
+						items: [
+							{ label: 'System Instructions', usedTokens: 1600 },
+							{ label: 'Tool Definitions', usedTokens: 1100 },
+						],
+					},
+				],
+			});
+
+			expect(adapter.getContextUsage()).toEqual({
+				usedTokens: 2700,
+				maxTokens: 272000,
+				percentage: 1,
+				source: 'acp',
+				summary: undefined,
+				sections: [
+					{
+						title: 'System',
+						items: [
+							{ label: 'System Instructions', usedTokens: 1600 },
+							{ label: 'Tool Definitions', usedTokens: 1100 },
+						],
+					},
+				],
+				lastUpdatedAt: expect.any(Number),
+			});
+		});
 	});
 });

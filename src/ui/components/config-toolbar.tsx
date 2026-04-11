@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ConfigOption } from '../../core/types';
 
 interface ConfigToolbarProps {
@@ -13,15 +13,41 @@ const iconByCategory: Record<string, string> = {
 	thought_level: 'T',
 };
 
+const TOOLBAR_BUTTON_MIN_WIDTH = '108px';
+const TOOLBAR_BUTTON_MAX_WIDTH = '156px';
+const TOOLBAR_DROPDOWN_MIN_WIDTH = '220px';
+const TOOLBAR_DROPDOWN_MAX_WIDTH = 'min(280px, calc(100vw - 32px))';
+
 export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 	const [openId, setOpenId] = useState<string | null>(null);
+	const rootRef = useRef<HTMLDivElement | null>(null);
+
+	useEffect(() => {
+		if (!openId) {
+			return;
+		}
+
+		const handlePointerDown = (event: MouseEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
+
+			if (!rootRef.current?.contains(target)) {
+				setOpenId(null);
+			}
+		};
+
+		document.addEventListener('mousedown', handlePointerDown);
+		return () => document.removeEventListener('mousedown', handlePointerDown);
+	}, [openId]);
 
 	if (options.length === 0) {
 		return null;
 	}
 
 	return (
-		<div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+		<div ref={rootRef} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
 			{options.map((option) => {
 				const icon = iconByCategory[option.category ?? ''] ?? 'C';
 				const isOpen = openId === option.id;
@@ -47,20 +73,38 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 							style={{
 								display: 'flex',
 								alignItems: 'center',
-								gap: '0.2rem',
-								padding: '0.2rem 0.4rem',
+								justifyContent: 'space-between',
+								gap: '0.25rem',
+								minWidth: TOOLBAR_BUTTON_MIN_WIDTH,
+								maxWidth: TOOLBAR_BUTTON_MAX_WIDTH,
+								height: '24px',
+								padding: '0.2rem 0.45rem',
+								boxSizing: 'border-box',
 								background: 'transparent',
 								border: '1px solid var(--background-modifier-border)',
 								borderRadius: '4px',
 								cursor: 'pointer',
 								fontSize: '0.7rem',
 								color: 'var(--text-muted)',
+								whiteSpace: 'nowrap',
+								overflow: 'hidden',
+								flexShrink: 0,
 							}}
 							aria-label={option.name}
 						>
-							<span>{icon}</span>
-							<span>{buttonLabel}</span>
-							{isSelectable && <span style={{ fontSize: '0.6rem' }}>?</span>}
+							<span style={{ flexShrink: 0 }}>{icon}</span>
+							<span
+								style={{
+									flex: '1',
+									minWidth: 0,
+									overflow: 'hidden',
+									textOverflow: 'ellipsis',
+									whiteSpace: 'nowrap',
+								}}
+							>
+								{buttonLabel}
+							</span>
+							{isSelectable && <span style={{ fontSize: '0.6rem', flexShrink: 0 }}>▾</span>}
 						</button>
 
 						{option.type === 'select' && isSelectable && isOpen && (
@@ -70,14 +114,16 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 									bottom: '100%',
 									left: '0',
 									zIndex: '1000',
-									minWidth: '180px',
-									maxWidth: '260px',
+									minWidth: TOOLBAR_DROPDOWN_MIN_WIDTH,
+									maxWidth: TOOLBAR_DROPDOWN_MAX_WIDTH,
 									padding: '0.3rem',
+									boxSizing: 'border-box',
 									background: 'var(--background-primary)',
 									border: '1px solid var(--background-modifier-border)',
 									borderRadius: '4px',
 									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
 									marginBottom: '0.3rem',
+									overflowX: 'hidden',
 								}}
 							>
 								{option.options.map((item) => (
@@ -89,10 +135,15 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 											await onSelect(option.id, item.value);
 										}}
 										style={{
-											display: 'block',
+											display: 'flex',
+											flexDirection: 'column',
+											alignItems: 'stretch',
+											gap: '0.12rem',
 											width: '100%',
-											padding: '0.3rem 0.45rem',
+											minHeight: '40px',
+											padding: '0.38rem 0.45rem',
 											marginBottom: '0.15rem',
+											boxSizing: 'border-box',
 											border: 'none',
 											borderRadius: '3px',
 											textAlign: 'left',
@@ -101,11 +152,33 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 											background:
 												item.value === option.currentValue ? 'var(--background-modifier-hover)' : 'transparent',
 											color: 'var(--text-normal)',
+											overflow: 'hidden',
+											lineHeight: '1.35',
 										}}
 									>
-										<div>{item.name}</div>
+										<div
+											style={{
+												lineHeight: '1.3',
+												overflow: 'hidden',
+												textOverflow: 'ellipsis',
+												whiteSpace: 'nowrap',
+											}}
+										>
+											{item.name}
+										</div>
 										{item.description && (
-											<div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{item.description}</div>
+											<div
+												style={{
+													fontSize: '0.68rem',
+													color: 'var(--text-muted)',
+													lineHeight: '1.3',
+													overflow: 'hidden',
+													textOverflow: 'ellipsis',
+													whiteSpace: 'nowrap',
+												}}
+											>
+												{item.description}
+											</div>
 										)}
 									</button>
 								))}
