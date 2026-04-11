@@ -54,7 +54,7 @@ export function createKimiBackendConfig(): AgentBackendConfig {
 	return {
 		type: 'acp-bridge',
 		id: 'kimi',
-		name: '🌙 Kimi Code',
+		name: 'Kimi Code',
 		command: 'kimi',
 		args: ['acp'],
 		registryAgentId: 'kimi',
@@ -140,6 +140,57 @@ export function generateBackendId(type: BackendType): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
+export function enrichBackendsFromRegistry(
+	backends: AgentBackendConfig[],
+	registry: AcpRegistryResponse | null,
+): { backends: AgentBackendConfig[]; changed: boolean } {
+	if (!registry?.agents?.length) {
+		return { backends, changed: false };
+	}
+
+	const registryConfigs = new Map<string, AgentBackendConfig>();
+	for (const agent of registry.agents) {
+		try {
+			const config = registryAgentToBackendConfig(agent);
+			registryConfigs.set(config.id, config);
+		} catch (err) {
+			console.warn(`[AgentLink] Skipping registry agent ${agent.id}:`, err);
+		}
+	}
+
+	let changed = false;
+	const enriched = backends.map((backend) => {
+		if (backend.type !== 'acp-bridge') {
+			return backend;
+		}
+
+		const lookupId = backend.registryAgentId || backend.id;
+		const registryConfig = registryConfigs.get(lookupId);
+		if (!registryConfig) {
+			return backend;
+		}
+
+		const nextBackend = {
+			...backend,
+			version: registryConfig.version ?? backend.version,
+			icon: registryConfig.icon ?? backend.icon,
+			registryAgentId: registryConfig.registryAgentId ?? backend.registryAgentId,
+		};
+
+		if (
+			nextBackend.version !== backend.version
+			|| nextBackend.icon !== backend.icon
+			|| nextBackend.registryAgentId !== backend.registryAgentId
+		) {
+			changed = true;
+		}
+
+		return nextBackend;
+	});
+
+	return { backends: enriched, changed };
+}
+
 /**
  * Merge official ACP registry agents into the user's backend list.
  * - Fetches/loads registry (respecting sync settings)
@@ -180,12 +231,18 @@ export async function mergeAcpRegistryIntoSettings(
     backendsMap.set(be.id, be);
   }
 
-  // Add/override with registry agents
+  const existingBackends = Array.from(backendsMap.values());
+  const { backends: enrichedExisting } = enrichBackendsFromRegistry(existingBackends, registry);
+  backendsMap.clear();
+  for (const backend of enrichedExisting) {
+    backendsMap.set(backend.id, backend);
+  }
+
+  // Add registry agents that are not yet in settings.
   if (registry?.agents) {
     for (const agent of registry.agents) {
       try {
         const config = registryAgentToBackendConfig(agent);
-        // Only add if not already present (by id) - lets user edit and preserve
         if (!backendsMap.has(config.id)) {
           backendsMap.set(config.id, config);
         }

@@ -265,8 +265,21 @@ export class SelectAcpAgentModal extends Modal {
     header.style.marginBottom = '0.5em';
 
     const icon = header.createEl('span');
-    icon.textContent = config.distribution === 'npx' ? '📦' : 
-                      config.distribution === 'uvx' ? '🐍' : '🔧';
+    icon.style.width = '20px';
+    icon.style.height = '20px';
+    icon.style.display = 'inline-flex';
+    icon.style.alignItems = 'center';
+    icon.style.justifyContent = 'center';
+    if (agent.icon?.startsWith('http://') || agent.icon?.startsWith('https://') || agent.icon?.startsWith('data:image/')) {
+      const image = icon.createEl('img');
+      image.src = agent.icon;
+      image.alt = '';
+      image.style.width = '100%';
+      image.style.height = '100%';
+      image.style.objectFit = 'contain';
+    } else {
+      icon.textContent = agent.icon || (config.distribution === 'npx' ? '⌘' : config.distribution === 'uvx' ? '◈' : '○');
+    }
 
     header.createEl('strong', { text: agent.name });
     
@@ -336,6 +349,8 @@ function launchConfigToBackendConfig(launchConfig: AgentLaunchConfig): AgentBack
     name: launchConfig.name,
     command: launchConfig.command,
     args: launchConfig.args,
+    version: launchConfig.registryVersion,
+    icon: launchConfig.icon,
     registryAgentId: launchConfig.agentId,
   };
 }

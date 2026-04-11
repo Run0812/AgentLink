@@ -57,89 +57,17 @@ npm install @agentclientprotocol/sdk
 - SDK 文档: https://agentclientprotocol.github.io/typescript-sdk/
 - ClientSideConnection: https://agentclientprotocol.github.io/typescript-sdk/classes/ClientSideConnection.html
 - 示例代码: https://github.com/agentclientprotocol/typescript-sdk/tree/main/src/examples
+- Obsidian插件规范：https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
 
 ---
 
 ## 关键要求
 
-### 所有对AGENTS.md的修改都需要我手动确认
-
-### 必须阅读ACP官方文档来确认功能实现方式
-
-### 所有通信必须输出到 Console
-
-为了方便前端开发者调试，所有关键通信步骤必须输出到 console：
-
-```typescript
-console.log('[ACP] Connecting to agent...');
-console.log('[ACP] Sending prompt:', prompt);
-console.log('[ACP] Received response:', response);
-console.error('[ACP] Error:', error);
-```
-
-### 禁止手写 ACP 协议
-
-❌ **禁止这样写**:
-```typescript
-// 手写 JSON-RPC
-private sendRawMessage(message: JsonRpcRequest) {
-  this.process.stdin.write(JSON.stringify(message) + '\n');
-}
-```
-
-✅ **必须这样写**:
-```typescript
-import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
-
-const connection = new ClientSideConnection(clientHandler, stream);
-```
-
-### 使用 SDK 的标准流程
-
-```typescript
-import { 
-  ClientSideConnection, 
-  ndJsonStream,
-  type Client,
-  type SessionUpdate 
-} from '@agentclientprotocol/sdk';
-
-// 1. 创建 stream
-const stream = ndJsonStream(stdin, stdout);
-
-// 2. 创建 Client handler
-const client: Client = {
-  sessionUpdate: (params) => {
-    console.log('[ACP] Update:', params.update?.sessionUpdate);
-    // 处理消息更新
-    return Promise.resolve();
-  },
-  // ... 其他必需的方法
-};
-
-// 3. 创建连接
-const connection = new ClientSideConnection(() => client, stream);
-
-// 4. 初始化
-await connection.initialize({
-  protocolVersion: 1,
-  clientCapabilities: { ... },
-  clientInfo: { name: 'AgentLink', version: '1.0.0' }
-});
-
-// 5. 创建 session
-const session = await connection.newSession({
-  cwd: '/path/to/workspace',
-  mcpServers: []
-});
-
-// 6. 发送 prompt
-const response = await connection.prompt({
-  sessionId: session.sessionId,
-  prompt: [{ type: 'text', text: 'Hello' }]
-});
-```
-
+1. 所有对AGENTS.md的修改都需要我手动确认
+2.  必须阅读ACP官方文档来确认功能实现方式
+3.  Dev或Debug模式下所有ACP通信必须输出到 Console
+4. 禁止手写 ACP 协议
+5.  使用 SDK 的标准流程
 
 ---
 

@@ -124,7 +124,17 @@ export class AcpAgentEditorModal extends Modal {
     const icon = infoCard.createEl('div');
     icon.style.fontSize = '2em';
     icon.style.marginBottom = '0.25em';
-    icon.textContent = this.getAgentIcon();
+    const iconValue = this.getAgentIcon();
+    if (iconValue.startsWith('http://') || iconValue.startsWith('https://') || iconValue.startsWith('data:image/')) {
+      const image = icon.createEl('img');
+      image.src = iconValue;
+      image.alt = '';
+      image.style.width = '32px';
+      image.style.height = '32px';
+      image.style.objectFit = 'contain';
+    } else {
+      icon.textContent = iconValue;
+    }
 
     infoCard.createEl('strong', { text: this.config.name });
     
@@ -148,6 +158,10 @@ export class AcpAgentEditorModal extends Modal {
   }
 
   private getAgentIcon(): string {
+    if (this.config.icon) {
+      return this.config.icon;
+    }
+
     // Simple heuristic based on registry ID or command
     const id = this.config.registryAgentId || this.config.id;
     if (id?.includes('kimi')) return '🌙';

@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { createKimiBackendConfig, createAcpBridgeBackendConfig, isValidBackendId, generateBackendId } from '../../src/settings/settings';
+import {
+	createKimiBackendConfig,
+	createAcpBridgeBackendConfig,
+	isValidBackendId,
+	generateBackendId,
+	enrichBackendsFromRegistry,
+} from '../../src/settings/settings';
 
 describe('createKimiBackendConfig', () => {
 	it('creates Kimi backend with correct command and args', () => {
@@ -53,5 +59,41 @@ describe('generateBackendId', () => {
 	it('generates acp-bridge ID with prefix', () => {
 		const id = generateBackendId('acp-bridge');
 		expect(id).toMatch(/^acp-\d+/);
+	});
+});
+
+describe('enrichBackendsFromRegistry', () => {
+	it('backfills icon and version for existing registry backend', () => {
+		const backends = [createKimiBackendConfig()];
+		const result = enrichBackendsFromRegistry(backends, {
+			version: '1',
+			agents: [
+				{
+					id: 'kimi',
+					name: 'Kimi Code',
+					version: '1.2.3',
+					description: 'Kimi agent',
+					icon: 'https://cdn.example.com/kimi.svg',
+					distribution: {
+						npx: {
+							package: '@acme/kimi',
+						},
+					},
+				},
+			],
+		});
+
+		expect(result.changed).toBe(true);
+		expect(result.backends[0].icon).toBe('https://cdn.example.com/kimi.svg');
+		expect(result.backends[0].version).toBe('1.2.3');
+		expect(result.backends[0].registryAgentId).toBe('kimi');
+	});
+
+	it('leaves backends unchanged when registry is missing', () => {
+		const backends = [createAcpBridgeBackendConfig('manual', 'Manual', 'manual-agent', [])];
+		const result = enrichBackendsFromRegistry(backends, null);
+
+		expect(result.changed).toBe(false);
+		expect(result.backends).toEqual(backends);
 	});
 });

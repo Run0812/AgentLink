@@ -29,7 +29,7 @@
 | Phase 3 - ACP Bridge Mode | 完成 | 100% |
 | Phase 4 - 历史对话保存 | 完成 | 100% |
 | Phase 5 - agent命令支持 | 完成 | 100% |
-| Phase 6 - UI-UX 优化 | 进行中 | 0% |
+| Phase 6 - UI-UX 优化 | 进行中 | 91% |
 
 ---
 
@@ -45,13 +45,19 @@
 - [x] **LED 连接状态指示修复** - 首次打开和切换 agent 时正确显示连接状态
 - [x] **新对话预连接与命令预加载** - 新建对话或打开面板时主动准备 ACP session，避免黄灯长期闪烁并提前加载 `availableCommands`
 - [x] **切换 Agent 立即预连接** - 聊天窗口切换 agent 后立即开始建立 ACP 连接，不再等待首条消息
-- [ ] **输入框快捷键优化** - Enter 发送，Shift/Ctrl+Enter 换行
-- [ ] **@ 文件后附件显示** - 选择文件后自动添加到输入状态栏
-- [ ] **@current note 整合** - 将 Current note 按钮整合到 @ 菜单中
-- [ ] **@ 和 / 整体渲染** - 引用文本以标签样式显示
+- [x] **已注册 agent icon 回填** - 现有 backend 在加载设置时会从本地 ACP registry 回填 `icon` / `version`，聊天窗口优先显示 agent 自己的 registry icon
+- [x] **上下文使用情况显示** - 当 ACP 返回可用 usage 数据时，在底部显示小饼图和悬停明细；无数据时完全隐藏
+- [x] **输入框快捷键优化** - Enter 发送，Shift/Ctrl+Enter 换行，并在自动完成菜单打开时避免误发送
+- [x] **@ 文件后附件显示** - 选择文件后自动添加到输入状态栏
+- [x] **@current note 整合** - 将 Current note 作为 `@` 菜单顶部选项
+- [x] **@ 和 / 整体渲染** - `@` 引用和 `/command` 已作为 inline token 嵌入输入框文字流，不再显示为输入框外单独状态栏
+- [x] **输入框内嵌 token composer** - 输入区已切换为 `contenteditable` composer，支持在文字流内插入引用 token 和命令 token
+- [x] **标题栏布局结构优化** - 清理标题栏残留旧按钮样式，统一标题栏层级、按钮样式和单分隔线表现
+- [ ] **底部工具栏图标方案** - 统一 icon 资源来源和风格，再替换现有临时图标
 
 #### ACP 命令与会话配置
 - [x] **/ 命令功能验证** - 区分内建命令与 Agent `availableCommands`，避免将 Agent 命令误当作内建命令执行
+- [x] **/ 内建命令执行** - `/clear`、`/help` 可执行，并与 Agent 命令区分
 - [x] **Agent Slash Command 输入提示** - 支持 `availableCommands.input.hint`，选择后插入 `/command ` 文本而不是直接执行错误动作
 - [x] **Slash Commands 动态更新** - 正确处理 `available_commands_update` 的增删改，并在当前会话中即时反映到 UI
 - [x] **Session Config Options 完整支持** - 使用官方 SDK 调用 `session/set_config_option`，按 Agent 提供的顺序和 category 渲染
@@ -59,6 +65,12 @@
 - [x] **Session Modes 兼容支持** - 当 Agent 未提供 `configOptions` 时回退到 `modes`，支持 `session/set_mode` 与 `current_mode_update`
 - [x] **Agent Plan 面板** - 展示 `plan` entries，并按协议使用完整列表替换当前 plan
 - [x] **ACP 协议回归测试** - 覆盖 `available_commands_update`、`current_mode_update`、`plan`、`config_option_update` 以及 `set_mode` / `set_config_option`
+- [x] **ACP 认证流程** - `session/new` 遇到认证错误时弹出认证方式选择，调用 `authenticate` 后自动重试建 session
+- [ ] **ACP 扩展认证方式** - 评估并实现 UNSTABLE 的 `env_var` / `terminal` auth method 支持
+
+#### 文档与收尾
+- [ ] **README.md 重写** - 反映当前 ACP 能力、缓存策略、权限与 UI 结构
+- [ ] **遗留 mock 文案清理** - 清理代码和 UI 中残留的 mock backend 文案与注释
 
 ---
 
@@ -81,10 +93,11 @@
 
 ## 待开发功能
 
-暂无（已整合到当前焦点任务）
-- [ ] 标题栏的布局结构优化，目前取消无用的嵌套
-- [ ] 美化ICON，请先提出ICON的优化方案，从哪里获取ICON资源，风格统一简洁务实
-
+- [ ] ACP 扩展认证方式（`env_var` / `terminal`）
+- [ ] 富文本输入细节打磨（token 删除手感、键盘导航、选区行为、移动端兼容）
+- [ ] 底部工具栏图标方案
+- [ ] README.md 重写
+- [ ] 清理残留 mock 文案和注释
 
 ---
 
@@ -99,7 +112,7 @@
 
 ### 必须更新
 - [ ] **README.md** - 完全重写，反映当前功能
-- [ ] **02-progress.md** - 更新到最新进度
+- [x] **02-progress.md** - 更新到最新进度
 
 ---
 
@@ -148,23 +161,25 @@
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | LED 连接状态 | 已完成 | 首次打开和切换 agent 时正确显示，并随 ACP session 预热更新 |
-| 输入框快捷键 | 待实现 | Enter 发送，Shift+Enter 换行 |
-| @ 文件自动附加 | 待实现 | 选择后自动添加到输入状态栏 |
-| @current note 整合 | 待实现 | 整合到 @ 菜单中 |
-| 快捷键冲突修复 | 待实现 | 自动完成菜单打开时不触发发送 |
-| / 命令功能完善 | 待实现 | /clear、/help 等命令可执行 |
-| / 命令测试脚本 | 待实现 | 创建单元测试 |
+| 输入框快捷键 | 已完成 | Enter 发送，Shift/Ctrl+Enter 换行 |
+| @ 文件自动附加 | 已完成 | 选择后自动添加到输入状态栏 |
+| @current note 整合 | 已完成 | 已整合到 @ 菜单顶部 |
+| 快捷键冲突修复 | 已完成 | 自动完成菜单打开时不触发发送 |
+| / 命令功能完善 | 已完成 | `/clear`、`/help` 已可执行 |
+| / 命令测试脚本 | 已完成 | 已补单元测试 |
 | **ACP Slash Commands 动态支持** | 已完成 | `available_commands_update`、`input.hint`、Agent 命令插入与执行语义 |
-| **ACP client 能力补齐** | 部分完成 | 已补 `fs` 绝对路径适配、自动建目录、真实 permission 选择，并移除虚假的 `terminal: true`；认证流程待补 |
+| **ACP client 能力补齐** | 部分完成 | 已补 `fs` 绝对路径适配、自动建目录、真实 permission 选择、`authenticate` 主链，并移除虚假的 `terminal: true`；UNSTABLE 扩展认证方式待补 |
 | **新对话预热建连** | 已完成 | 打开面板/新建对话时主动建立 ACP session，并同步刷新 LED、commands、config |
 | **ACP 连接缓存与过期回收** | 已完成 | 按 backend 复用 ACP adapter/连接，切换后立即预热，并支持 TTL 配置清理失活连接 |
-| **移除 MockAdapter** | 待实现 | 简化代码库，只保留 ACP Bridge |
-| 引用标签渲染 | 待实现 | @ 和 / 以引用块样式显示 |
+| **上下文 usage 指示器** | 已完成 | 仅在 ACP 返回 usage 数据时显示底部小饼图和悬停明细，无数据时隐藏 |
+| **registry agent 自身 icon 显示** | 已完成 | 已接入 registry icon 透传与已有 backend 自动回填 |
+| **移除 MockAdapter** | 部分完成 | 主流程已移除，仍有少量 mock 文案/注释待清理 |
+| 引用标签渲染 | 已完成 | 采用输入状态栏标签预览方案显示 `@` 与当前 `/command` |
 
 ### ACP 协议能力补齐（2026-04-10 文档复核）
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| Slash Commands 基础列表接收 | 部分完成 | 已能接收 `available_commands_update`，但 Agent 命令选择后的执行语义仍需修正 |
+| Slash Commands 基础列表接收 | 已完成 | 已支持基础列表接收、Agent 命令插入语义与 `input.hint` |
 | Slash Commands 动态更新 | 已完成 | 命令增删改可刷新当前自动完成菜单，并支持 `input.hint` |
 | Session Config Options UI | 已完成 | 工具栏按 Agent 提供配置渲染，并使用官方 SDK 请求更新 |
 | `config_option_update` 即时刷新 | 已完成 | adapter 更新后会通知 UI 重渲染工具栏 |
@@ -198,4 +213,4 @@
 
 ---
 
-*最后更新: 2026-04-10*
+*最后更新: 2026-04-11*

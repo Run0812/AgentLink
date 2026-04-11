@@ -9,7 +9,7 @@
  *   - Wire up to a SessionStore for history
  * ──────────────────────────────────────────────────────────────────────── */
 
-import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent } from 'obsidian';
+import { ItemView, MarkdownRenderer, Notice, WorkspaceLeaf, Modal, ButtonComponent, setIcon } from 'obsidian';
 import { AgentAdapter, AgentInput, ChatMessage, MessageRole, StreamHandlers, CAPABILITY_LABELS, ToolCall, ToolResult, FileEditMetadata, generateId, SessionConfigState, ConfigOption, PlanEntry, ContextUsageState } from '../core/types';
 import { h, render } from 'preact';
 import { ConfigToolbar } from './components/config-toolbar';
@@ -20,7 +20,6 @@ import { ToolExecutor, ToolExecutorConfig } from '../services/tool-executor';
 import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '../settings/settings';
 import { SessionManager, SessionMetadata } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
-import { InputStateBar } from './components/input-state-bar';
 import { InputAutocomplete, createSlashCommandSuggestions, createAvailableCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger, buildAgentSlashCommandText } from './components/input-autocomplete';
 import { parseBuiltinSlashCommandPrompt } from './slash-command-utils';
 import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
@@ -53,7 +52,7 @@ export class ChatView extends ItemView {
 
 	// ── DOM references ─────────────────────────────────────────────────
 	private messagesEl!: HTMLElement;
-	private inputEl!: HTMLTextAreaElement;
+	private inputEl!: HTMLDivElement;
 	private sendBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
 	private clearBtn!: HTMLButtonElement;
@@ -69,6 +68,8 @@ export class ChatView extends ItemView {
 	private bottomToolbar!: HTMLElement;
 	private statusLed!: HTMLElement;
 	private agentSelectorBtn!: HTMLButtonElement; // Agent 选择按钮
+	private agentSelectorIconEl!: HTMLElement;
+	private agentSelectorLabelEl!: HTMLElement;
 	private modelSelectorBtn!: HTMLButtonElement; // 模型选择按钮
 	private contextUsageContainer!: HTMLElement;
 	private contextUsageButton!: HTMLButtonElement;
@@ -78,6 +79,7 @@ export class ChatView extends ItemView {
 
 	// ── Input Area ─────────────────────────────────────────────────────
 	private inputAreaContainer!: HTMLElement;
+	private inputShell!: HTMLElement;
 	private inputRow!: HTMLElement;
 	private resizeHandle!: HTMLElement;
 	private inputMinHeight = 80;
@@ -99,6 +101,7 @@ export class ChatView extends ItemView {
 	private isAutocompleteOpen = false;
 	private currentAutocompleteTrigger: AutocompleteTrigger = null;
 	private currentAutocompleteQuery = '';
+	private composerSelectionRange: Range | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -217,8 +220,8 @@ export class ChatView extends ItemView {
 
 	prefillInput(text: string): void {
 		if (this.inputEl) {
-			this.inputEl.value = text;
-			this.inputEl.focus();
+			this.setComposerText(text);
+			this.focusComposer();
 		}
 	}
 
@@ -232,6 +235,9 @@ export class ChatView extends ItemView {
 		// Header
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
 		this.headerEl.style.width = '100%';
+		this.headerEl.style.display = 'block';
+		this.headerEl.style.padding = '0';
+		this.headerEl.style.borderBottom = 'none';
 		
 		// Row 1: Session title (left) | Actions (right)
 		const headerRow1 = this.headerEl.createDiv({ cls: 'agentlink-header-row1' });
@@ -262,13 +268,10 @@ export class ChatView extends ItemView {
 		const historyContainer = rightSection.createDiv();
 		historyContainer.style.position = 'relative';
 		this.historyBtn = historyContainer.createEl('button');
-		this.historyBtn.innerHTML = '🕐';
-		this.historyBtn.style.padding = '0.3rem 0.4rem';
-		this.historyBtn.style.background = 'transparent';
-		this.historyBtn.style.border = 'none';
-		this.historyBtn.style.cursor = 'pointer';
-		this.historyBtn.style.fontSize = '0.95rem';
-		this.historyBtn.style.opacity = '0.7';
+		this.applyHeaderActionButtonStyle(this.historyBtn, 'Chat history');
+		setIcon(this.historyBtn, 'history');
+		this.applyHeaderActionButtonStyle(this.historyBtn, 'Chat history');
+		setIcon(this.historyBtn, 'history');
 		this.historyBtn.addEventListener('mouseenter', () => this.historyBtn.style.opacity = '1');
 		this.historyBtn.addEventListener('mouseleave', () => this.historyBtn.style.opacity = '0.7');
 		
@@ -284,26 +287,20 @@ export class ChatView extends ItemView {
 		
 		// Clear button
 		this.clearBtn = rightSection.createEl('button');
-		this.clearBtn.innerHTML = '✕';
-		this.clearBtn.style.padding = '0.3rem 0.4rem';
-		this.clearBtn.style.background = 'transparent';
-		this.clearBtn.style.border = 'none';
-		this.clearBtn.style.cursor = 'pointer';
-		this.clearBtn.style.fontSize = '0.95rem';
-		this.clearBtn.style.opacity = '0.7';
+		this.applyHeaderActionButtonStyle(this.clearBtn, 'Clear conversation');
+		setIcon(this.clearBtn, 'x');
+		this.applyHeaderActionButtonStyle(this.clearBtn, 'Clear conversation');
+		setIcon(this.clearBtn, 'x');
 		this.clearBtn.addEventListener('mouseenter', () => this.clearBtn.style.opacity = '1');
 		this.clearBtn.addEventListener('mouseleave', () => this.clearBtn.style.opacity = '0.7');
 		this.clearBtn.addEventListener('click', () => this.clearConversation());
 		
 		// New Chat button
 		const newChatBtn = rightSection.createEl('button');
-		newChatBtn.innerHTML = '＋';
-		newChatBtn.style.padding = '0.3rem 0.4rem';
-		newChatBtn.style.background = 'transparent';
-		newChatBtn.style.border = 'none';
-		newChatBtn.style.cursor = 'pointer';
-		newChatBtn.style.fontSize = '0.95rem';
-		newChatBtn.style.opacity = '0.7';
+		this.applyHeaderActionButtonStyle(newChatBtn, 'New chat');
+		setIcon(newChatBtn, 'plus');
+		this.applyHeaderActionButtonStyle(newChatBtn, 'New chat');
+		setIcon(newChatBtn, 'plus');
 		newChatBtn.addEventListener('mouseenter', () => newChatBtn.style.opacity = '1');
 		newChatBtn.addEventListener('mouseleave', () => newChatBtn.style.opacity = '0.7');
 		newChatBtn.addEventListener('click', () => this.createNewSession());
@@ -329,12 +326,29 @@ export class ChatView extends ItemView {
 		this.inputAreaContainer.style.flexDirection = 'column';
 		this.inputAreaContainer.style.minHeight = `${this.inputMinHeight}px`;
 		this.inputAreaContainer.style.position = 'relative';
+		this.inputAreaContainer.style.padding = '0.45rem 0.6rem 0.55rem';
 
-		// Phase 5: Input state bar container (above input row)
-		this.inputStateContainer = this.inputAreaContainer.createDiv();
-		this.inputStateContainer.style.borderBottom = '1px solid var(--background-modifier-border)';
-		this.inputStateContainer.style.background = 'var(--background-secondary)';
-		this.renderInputStateBar();
+		this.inputShell = this.inputAreaContainer.createDiv({ cls: 'agentlink-input-shell' });
+		this.inputShell.style.display = 'flex';
+		this.inputShell.style.flexDirection = 'column';
+		this.inputShell.style.flex = '1';
+		this.inputShell.style.minHeight = '72px';
+		this.inputShell.style.background = 'var(--background-primary)';
+		this.inputShell.style.border = '1px solid var(--background-modifier-border)';
+		this.inputShell.style.borderRadius = '10px';
+		this.inputShell.style.overflow = 'hidden';
+		this.inputShell.style.boxShadow = '0 1px 0 rgba(255, 255, 255, 0.02)';
+		this.inputShell.addEventListener('click', (evt) => {
+			const target = evt.target;
+			if (target instanceof HTMLButtonElement || target instanceof HTMLAnchorElement) {
+				return;
+			}
+			this.inputEl?.focus();
+		});
+
+		// Reserved for future inline helper UI. Inline tokens now render directly in the editor flow.
+		this.inputStateContainer = this.inputShell.createDiv();
+		this.inputStateContainer.style.display = 'none';
 		
 		// Phase 5: Autocomplete container (absolute positioned, will be placed above input)
 		this.autocompleteContainer = this.inputAreaContainer.createDiv();
@@ -345,24 +359,39 @@ export class ChatView extends ItemView {
 		this.autocompleteContainer.style.zIndex = '1000';
 
 		// Input row with textarea
-		this.inputRow = this.inputAreaContainer.createDiv();
+		this.inputRow = this.inputShell.createDiv();
 		this.inputRow.style.display = 'flex';
 		this.inputRow.style.flexDirection = 'column';
 		this.inputRow.style.flex = '1';
 		this.inputRow.style.minHeight = '60px';
 		this.inputRow.style.position = 'relative';
+		this.inputRow.style.padding = '0 0.6rem';
 
-		// Create textarea
-		this.inputEl = this.inputRow.createEl('textarea', { placeholder: 'Ask your AI agent…' });
+		// Create inline composer editor
+		this.inputEl = this.inputRow.createDiv({ cls: 'agentlink-inline-composer' });
+		this.inputEl.contentEditable = 'true';
+		this.inputEl.setAttribute('role', 'textbox');
+		this.inputEl.setAttribute('aria-multiline', 'true');
+		this.inputEl.setAttribute('data-placeholder', 'Ask anything. Use @ for files and / for commands.');
 		this.inputEl.style.width = '100%';
 		this.inputEl.style.height = '100%';
 		this.inputEl.style.minHeight = '60px';
-		this.inputEl.style.padding = '0.5rem 0.6rem';
+		this.inputEl.style.padding = '0.15rem 0 0.55rem';
 		this.inputEl.style.border = 'none';
 		this.inputEl.style.background = 'transparent';
 		this.inputEl.style.fontSize = '0.9rem';
-		this.inputEl.style.resize = 'none';
+		this.inputEl.style.lineHeight = '1.5';
 		this.inputEl.style.outline = 'none';
+		this.inputEl.style.whiteSpace = 'pre-wrap';
+		this.inputEl.style.wordBreak = 'break-word';
+		this.inputEl.addEventListener('click', () => this.refreshPlaceholderState());
+		this.inputEl.addEventListener('focus', () => {
+			this.refreshPlaceholderState();
+			this.captureComposerSelection();
+		});
+		this.inputEl.addEventListener('blur', () => this.refreshPlaceholderState());
+		this.inputEl.addEventListener('keyup', () => this.captureComposerSelection());
+		this.inputEl.addEventListener('mouseup', () => this.captureComposerSelection());
 		this.inputEl.addEventListener('keydown', (evt) => {
 			if (evt.key === 'Enter') {
 				// When autocomplete is open, let it handle Enter key
@@ -380,6 +409,7 @@ export class ChatView extends ItemView {
 				}
 			}
 		});
+		this.refreshPlaceholderState();
 
 		// Resize handle at the top of input area (between messages and input)
 		this.resizeHandle = this.inputAreaContainer.createDiv();
@@ -394,13 +424,12 @@ export class ChatView extends ItemView {
 		this.setupResizeHandle();
 
 		// Bottom toolbar: Status LED + Agent + Model + Config + Send/Stop
-		this.bottomToolbar = container.createDiv();
+		this.bottomToolbar = this.inputShell.createDiv();
 		this.bottomToolbar.style.display = 'flex';
 		this.bottomToolbar.style.alignItems = 'center';
 		this.bottomToolbar.style.gap = '0.4rem';
-		this.bottomToolbar.style.padding = '0.3rem 0.6rem';
-		this.bottomToolbar.style.borderTop = '1px solid var(--background-modifier-border)';
-		this.bottomToolbar.style.background = 'var(--background-secondary)';
+		this.bottomToolbar.style.padding = '0.2rem 0.55rem 0.45rem';
+		this.bottomToolbar.style.background = 'transparent';
 		
 		// Status LED (leftmost)
 		this.statusLed = this.bottomToolbar.createEl('span');
@@ -418,10 +447,18 @@ export class ChatView extends ItemView {
 		this.agentSelectorBtn = agentContainer.createEl('button');
 		this.applyToolbarSelectorButtonStyle(this.agentSelectorBtn, 'var(--text-normal)');
 		
-		const agentText = this.agentSelectorBtn.createEl('span');
-		agentText.textContent = 'Agent'; // Will be updated by refreshStatus
-		agentText.style.flex = '1';
-		this.applySingleLineEllipsis(agentText, '0.75rem');
+		this.agentSelectorIconEl = this.agentSelectorBtn.createEl('span');
+		this.agentSelectorIconEl.style.width = '14px';
+		this.agentSelectorIconEl.style.height = '14px';
+		this.agentSelectorIconEl.style.display = 'inline-flex';
+		this.agentSelectorIconEl.style.alignItems = 'center';
+		this.agentSelectorIconEl.style.justifyContent = 'center';
+		this.agentSelectorIconEl.style.flexShrink = '0';
+
+		this.agentSelectorLabelEl = this.agentSelectorBtn.createEl('span');
+		this.agentSelectorLabelEl.textContent = 'Agent'; // Will be updated by refreshStatus
+		this.agentSelectorLabelEl.style.flex = '1';
+		this.applySingleLineEllipsis(this.agentSelectorLabelEl, '0.75rem');
 		const agentArrow = this.agentSelectorBtn.createEl('span');
 		agentArrow.innerHTML = '▾';
 		agentArrow.style.fontSize = '0.6rem';
@@ -586,6 +623,12 @@ export class ChatView extends ItemView {
 					0%, 100% { opacity: 1; }
 					50% { opacity: 0.3; }
 				}
+
+				.agentlink-inline-composer:empty::before {
+					content: attr(data-placeholder);
+					color: var(--text-muted);
+					pointer-events: none;
+				}
 			`;
 			document.head.appendChild(style);
 		}
@@ -612,6 +655,58 @@ export class ChatView extends ItemView {
 		button.style.whiteSpace = 'nowrap';
 		button.style.overflow = 'hidden';
 		button.style.flexShrink = '0';
+	}
+
+	private applyHeaderActionButtonStyle(button: HTMLButtonElement, ariaLabel: string): void {
+		button.style.width = '28px';
+		button.style.height = '28px';
+		button.style.padding = '0';
+		button.style.display = 'inline-flex';
+		button.style.alignItems = 'center';
+		button.style.justifyContent = 'center';
+		button.style.background = 'transparent';
+		button.style.border = '1px solid var(--background-modifier-border)';
+		button.style.borderRadius = '6px';
+		button.style.cursor = 'pointer';
+		button.style.opacity = '0.7';
+		button.style.color = 'var(--text-muted)';
+		button.setAttribute('aria-label', ariaLabel);
+		button.setAttribute('data-tooltip-position', 'bottom');
+	}
+
+	private renderBackendIcon(container: HTMLElement, iconValue?: string, fallbackIcon: string = 'bot'): void {
+		container.empty();
+		if (iconValue && this.isImageLikeIcon(iconValue)) {
+			const image = container.createEl('img');
+			image.src = iconValue;
+			image.alt = '';
+			image.style.width = '100%';
+			image.style.height = '100%';
+			image.style.objectFit = 'contain';
+			image.style.borderRadius = '3px';
+			return;
+		}
+
+		if (iconValue) {
+			container.setText(iconValue);
+			container.style.fontSize = '0.85rem';
+			container.style.lineHeight = '1';
+			return;
+		}
+
+		setIcon(container, fallbackIcon);
+	}
+
+	private isImageLikeIcon(iconValue: string): boolean {
+		const trimmed = iconValue.trim().toLowerCase();
+		return trimmed.startsWith('http://')
+			|| trimmed.startsWith('https://')
+			|| trimmed.startsWith('data:image/')
+			|| trimmed.endsWith('.svg')
+			|| trimmed.endsWith('.png')
+			|| trimmed.endsWith('.jpg')
+			|| trimmed.endsWith('.jpeg')
+			|| trimmed.endsWith('.webp');
 	}
 
 	private applyToolbarDropdownStyle(
@@ -954,14 +1049,14 @@ export class ChatView extends ItemView {
 	// ── Message sending ────────────────────────────────────────────────
 
 	private async handleSend(): Promise<void> {
-		const originalPrompt = this.inputEl.value.trim();
+		const originalPrompt = this.getComposerText().trim();
 		if (!originalPrompt || this.isBusy) return;
 
 		const builtinCommand = parseBuiltinSlashCommandPrompt(originalPrompt);
 		if (builtinCommand) {
 			const handled = await this.executeSlashCommand(builtinCommand.commandId, builtinCommand.args);
 			if (handled) {
-				this.inputEl.value = '';
+				this.clearComposer();
 				return;
 			}
 		}
@@ -977,7 +1072,7 @@ export class ChatView extends ItemView {
 		// Add user message
 		const userMsg = this.session.addMessage('user', prompt);
 		this.renderMessage(userMsg);
-		this.inputEl.value = '';
+		this.clearComposer();
 
 		// Show busy state
 		this.setBusy(true);
@@ -1278,6 +1373,7 @@ export class ChatView extends ItemView {
 		this.messagesEl.empty();
 		this.renderWelcome();
 		this.statusEl?.setText('');
+		this.renderInputStateBar();
 	}
 
 	private setBusy(busy: boolean): void {
@@ -1299,9 +1395,11 @@ export class ChatView extends ItemView {
 		// Update agent selector text to show actual agent name
 		if (this.agentSelectorBtn) {
 			const activeBackend = getActiveBackendConfig(this.settings);
-			const agentText = this.agentSelectorBtn.querySelector('span') as HTMLElement;
-			if (agentText && activeBackend) {
-				agentText.textContent = activeBackend.name;
+			if (this.agentSelectorLabelEl) {
+				this.agentSelectorLabelEl.textContent = activeBackend?.name ?? 'Agent';
+			}
+			if (this.agentSelectorIconEl) {
+				this.renderBackendIcon(this.agentSelectorIconEl, activeBackend?.icon);
 			}
 		}
 
@@ -1635,6 +1733,7 @@ export class ChatView extends ItemView {
 		this.renderWelcome();
 		this.updateSessionTitle(session.title);
 		this.refreshStatus();
+		this.renderInputStateBar();
 		void this.prepareAdapterSession({ reset: true });
 		this.inputEl?.focus();
 	}
@@ -1657,6 +1756,7 @@ export class ChatView extends ItemView {
 
 		this.updateSessionTitle(session.title);
 		this.refreshStatus();
+		this.renderInputStateBar();
 		void this.prepareAdapterSession();
 	}
 
@@ -1833,9 +1933,13 @@ export class ChatView extends ItemView {
 			this.applyToolbarDropdownItemStyle(item);
 
 			const icon = item.createEl('span');
-			icon.innerHTML = '🤖';
-			icon.style.fontSize = '0.8rem';
+			icon.style.width = '14px';
+			icon.style.height = '14px';
+			icon.style.display = 'inline-flex';
+			icon.style.alignItems = 'center';
+			icon.style.justifyContent = 'center';
 			icon.style.flexShrink = '0';
+			this.renderBackendIcon(icon, backend.icon);
 
 			const name = item.createEl('span', { text: backend.name });
 			name.style.flex = '1';
@@ -2201,37 +2305,354 @@ export class ChatView extends ItemView {
 
 	// ── Phase 5: Input State Bar & Autocomplete ─────────────────────────
 
-	/** Render the input state bar with attachments */
 	private renderInputStateBar(): void {
-		if (!this.inputStateContainer) return;
+		this.refreshPlaceholderState();
+	}
 
-		const editor = this.app.workspace.activeEditor?.editor;
-		const hasSelection = editor ? editor.getSelection().length > 0 : false;
+	private refreshPlaceholderState(): void {
+		if (!this.inputEl) {
+			return;
+		}
 
-		render(
-			h(InputStateBar, {
-				attachments: this.contextService.listAttachments(),
-				totalSize: this.contextService.getTotalSize(),
-				onRemoveAttachment: (id: string) => {
-					this.contextService.removeAttachment(id);
-					this.renderInputStateBar();
-				},
-				onAttachFile: () => this.handleAttachFile(),
-				onAttachSelection: () => this.handleAttachSelection(),
-				canAttachSelection: hasSelection,
-			}),
-			this.inputStateContainer
+		const hasContent = this.inputEl.childNodes.length > 0 && this.getComposerText().length > 0;
+		if (hasContent) {
+			this.inputEl.style.removeProperty('position');
+			this.inputEl.style.removeProperty('color');
+			return;
+		}
+
+		this.inputEl.style.position = 'relative';
+	}
+
+	private getComposerText(): string {
+		if (!this.inputEl) {
+			return '';
+		}
+
+		return this.serializeComposerNode(this.inputEl);
+	}
+
+	private serializeComposerNode(node: Node): string {
+		if (node.nodeType === Node.TEXT_NODE) {
+			return node.textContent ?? '';
+		}
+
+		if (!(node instanceof HTMLElement)) {
+			return '';
+		}
+
+		if (node.dataset.kind === 'attachment' || node.dataset.kind === 'command') {
+			return node.dataset.rawText ?? node.innerText ?? '';
+		}
+
+		if (node.tagName === 'BR') {
+			return '\n';
+		}
+
+		return Array.from(node.childNodes).map((child) => this.serializeComposerNode(child)).join('');
+	}
+
+	private setComposerText(text: string): void {
+		if (!this.inputEl) {
+			return;
+		}
+
+		this.inputEl.empty();
+		if (text) {
+			this.inputEl.appendChild(document.createTextNode(text));
+		}
+		this.refreshPlaceholderState();
+	}
+
+	private clearComposer(): void {
+		this.setComposerText('');
+	}
+
+	private focusComposer(): void {
+		if (!this.inputEl) {
+			return;
+		}
+
+		this.inputEl.focus();
+		const range = document.createRange();
+		range.selectNodeContents(this.inputEl);
+		range.collapse(false);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+		this.captureComposerSelection();
+	}
+
+	private isSelectionInsideComposer(): boolean {
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) {
+			return false;
+		}
+
+		const range = selection.getRangeAt(0);
+		return this.inputEl.contains(range.startContainer) && this.inputEl.contains(range.endContainer);
+	}
+
+	private captureComposerSelection(): void {
+		if (!this.isSelectionInsideComposer()) {
+			return;
+		}
+
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) {
+			return;
+		}
+
+		this.composerSelectionRange = selection.getRangeAt(0).cloneRange();
+	}
+
+	private restoreComposerSelection(): void {
+		if (!this.inputEl || !this.composerSelectionRange) {
+			return;
+		}
+
+		const selection = window.getSelection();
+		if (!selection) {
+			return;
+		}
+
+		selection.removeAllRanges();
+		selection.addRange(this.composerSelectionRange.cloneRange());
+	}
+
+	private getTextBeforeCaret(): string {
+		if (!this.inputEl || !this.isSelectionInsideComposer()) {
+			return this.getComposerText();
+		}
+
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0) {
+			return '';
+		}
+
+		const range = selection.getRangeAt(0).cloneRange();
+		const prefixRange = document.createRange();
+		prefixRange.selectNodeContents(this.inputEl);
+		prefixRange.setEnd(range.endContainer, range.endOffset);
+		return this.serializeComposerFragment(prefixRange.cloneContents());
+	}
+
+	private serializeComposerFragment(fragment: DocumentFragment): string {
+		return Array.from(fragment.childNodes).map((child) => this.serializeComposerNode(child)).join('');
+	}
+
+	private getCurrentTextNodeContext(rangeOverride?: Range | null): { textNode: Text; offset: number; textBefore: string; textAfter: string } | null {
+		if (!this.inputEl) {
+			return null;
+		}
+
+		const range = rangeOverride ?? (() => {
+			const selection = window.getSelection();
+			if (!selection || selection.rangeCount === 0) {
+				return null;
+			}
+			return selection.getRangeAt(0);
+		})();
+		if (!range) {
+			return null;
+		}
+
+		let node = range.startContainer;
+		let offset = range.startOffset;
+
+		if (node.nodeType !== Node.TEXT_NODE) {
+			if (node instanceof HTMLElement) {
+				const before = offset > 0 ? node.childNodes[offset - 1] : null;
+				const at = offset < node.childNodes.length ? node.childNodes[offset] : null;
+
+				if (before?.nodeType === Node.TEXT_NODE) {
+					node = before;
+					offset = before.textContent?.length ?? 0;
+				} else if (at?.nodeType === Node.TEXT_NODE) {
+					node = at;
+					offset = 0;
+				} else {
+					const textNode = document.createTextNode('');
+					node.insertBefore(textNode, at ?? null);
+					node = textNode;
+					offset = 0;
+				}
+			}
+		}
+
+		if (node.nodeType !== Node.TEXT_NODE) {
+			return null;
+		}
+
+		const textNode = node as Text;
+		const text = textNode.textContent ?? '';
+		return {
+			textNode,
+			offset,
+			textBefore: text.slice(0, offset),
+			textAfter: text.slice(offset),
+		};
+	}
+
+	private replaceTriggerTextInCurrentNode(triggerChar: string): { trailingText: string } | null {
+		const context = this.getCurrentTextNodeContext(this.composerSelectionRange);
+		if (!context) {
+			return null;
+		}
+
+		const triggerIndex = context.textBefore.lastIndexOf(triggerChar);
+		if (triggerIndex < 0) {
+			return null;
+		}
+
+		const lastWhitespace = Math.max(
+			context.textBefore.lastIndexOf(' '),
+			context.textBefore.lastIndexOf('\n'),
 		);
+		if (triggerIndex < lastWhitespace) {
+			return null;
+		}
+
+		context.textNode.textContent = context.textBefore.slice(0, triggerIndex) + context.textAfter;
+		const range = document.createRange();
+		range.setStart(context.textNode, triggerIndex);
+		range.collapse(true);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+		this.composerSelectionRange = range.cloneRange();
+
+		return { trailingText: context.textAfter };
+	}
+
+	private insertTextAtCursor(text: string): void {
+		if (!this.inputEl) {
+			return;
+		}
+
+		this.inputEl.focus();
+		this.restoreComposerSelection();
+		document.execCommand('insertText', false, text);
+		this.captureComposerSelection();
+		this.refreshPlaceholderState();
+	}
+
+	private insertInlineToken(config: {
+		kind: 'attachment' | 'command';
+		id: string;
+		label: string;
+		rawText: string;
+		removableId?: string;
+	}): void {
+		if (!this.inputEl) {
+			return;
+		}
+
+		this.inputEl.focus();
+		this.restoreComposerSelection();
+		const selection = window.getSelection();
+		if (!selection || selection.rangeCount === 0 || !this.isSelectionInsideComposer()) {
+			this.focusComposer();
+		}
+
+		const activeSelection = window.getSelection();
+		if (!activeSelection || activeSelection.rangeCount === 0) {
+			return;
+		}
+
+		const range = activeSelection.getRangeAt(0);
+		range.deleteContents();
+
+		const token = this.createInlineTokenElement(config);
+		const trailingSpace = document.createTextNode(' ');
+		range.insertNode(trailingSpace);
+		range.insertNode(token);
+
+		const caretRange = document.createRange();
+		caretRange.setStartAfter(trailingSpace);
+		caretRange.collapse(true);
+		activeSelection.removeAllRanges();
+		activeSelection.addRange(caretRange);
+		this.captureComposerSelection();
+		this.refreshPlaceholderState();
+	}
+
+	private createInlineTokenElement(config: {
+		kind: 'attachment' | 'command';
+		id: string;
+		label: string;
+		rawText: string;
+		removableId?: string;
+	}): HTMLSpanElement {
+		const token = document.createElement('span');
+		token.contentEditable = 'false';
+		token.dataset.kind = config.kind;
+		token.dataset.tokenId = config.id;
+		token.dataset.rawText = config.rawText;
+		if (config.removableId) {
+			token.dataset.removableId = config.removableId;
+		}
+		token.style.display = 'inline-flex';
+		token.style.alignItems = 'center';
+		token.style.gap = '0.22rem';
+		token.style.margin = '0 0.08rem';
+		token.style.padding = '0.02rem 0.28rem';
+		token.style.borderRadius = '4px';
+		token.style.verticalAlign = 'baseline';
+		token.style.maxWidth = '260px';
+		token.style.border = 'none';
+		token.style.background = config.kind === 'command'
+			? 'var(--background-modifier-hover)'
+			: 'var(--background-modifier-hover)';
+		token.style.color = config.kind === 'command'
+			? 'var(--interactive-accent)'
+			: 'var(--text-normal)';
+
+		const label = document.createElement('span');
+		label.textContent = config.label;
+		label.style.display = 'inline-block';
+		label.style.maxWidth = '220px';
+		label.style.overflow = 'hidden';
+		label.style.textOverflow = 'ellipsis';
+		label.style.whiteSpace = 'nowrap';
+		label.style.fontSize = '0.76rem';
+		label.style.lineHeight = '1.2';
+		token.appendChild(label);
+
+		const remove = document.createElement('button');
+		remove.type = 'button';
+		remove.textContent = '×';
+		remove.style.background = 'transparent';
+		remove.style.border = 'none';
+		remove.style.color = 'inherit';
+		remove.style.cursor = 'pointer';
+		remove.style.padding = '0';
+		remove.style.margin = '0';
+		remove.style.fontSize = '0.7rem';
+		remove.style.lineHeight = '1';
+		remove.style.opacity = '0.7';
+		remove.addEventListener('click', (evt) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+			if (config.kind === 'attachment' && config.removableId) {
+				this.contextService.removeAttachment(config.removableId);
+			}
+			token.remove();
+			this.refreshPlaceholderState();
+			this.focusComposer();
+		});
+		token.appendChild(remove);
+
+		return token;
 	}
 
 	/** Setup autocomplete listeners for input */
 	private setupAutocompleteListeners(): void {
 		if (!this.inputEl) return;
 
-		this.inputEl.addEventListener('input', (e) => {
-			const value = this.inputEl.value;
-			const cursorPos = this.inputEl.selectionStart || 0;
-			const textBeforeCursor = value.substring(0, cursorPos);
+		this.inputEl.addEventListener('input', () => {
+			this.captureComposerSelection();
+			const textBeforeCursor = this.getTextBeforeCaret();
 
 			// Check for trigger characters
 			const lastSlash = textBeforeCursor.lastIndexOf('/');
@@ -2266,6 +2687,8 @@ export class ChatView extends ItemView {
 			} else {
 				this.hideAutocomplete();
 			}
+
+			this.refreshPlaceholderState();
 		});
 	}
 
@@ -2376,15 +2799,11 @@ export class ChatView extends ItemView {
 		item: { id: string; label: string; description?: string; icon?: string; data?: unknown; source?: 'builtin' | 'agent' },
 		trigger: AutocompleteTrigger
 	): Promise<void> {
-		const value = this.inputEl.value;
-		const cursorPos = this.inputEl.selectionStart || 0;
-		const textBeforeCursor = value.substring(0, cursorPos);
-		const textAfterCursor = value.substring(cursorPos);
+		this.inputEl.focus();
+		this.restoreComposerSelection();
 
-		let newText = '';
-		let newCursorPos = 0;
 		if (trigger === 'slash') {
-			const lastSlash = textBeforeCursor.lastIndexOf('/');
+			this.replaceTriggerTextInCurrentNode('/');
 			const commandId = item.id;
 			const insertion = item.source === 'agent'
 				? (() => {
@@ -2394,36 +2813,60 @@ export class ChatView extends ItemView {
 						: `/${commandId}`;
 				})()
 				: item.label;
-			newText = textBeforeCursor.substring(0, lastSlash) + insertion + textAfterCursor;
-			newCursorPos = textBeforeCursor.substring(0, lastSlash).length + insertion.length;
+			this.insertInlineToken({
+				kind: 'command',
+				id: `command-${Date.now()}`,
+				label: insertion,
+				rawText: insertion,
+			});
 		} else if (trigger === 'mention') {
-			// Handle file/folder mention: attach as file and update input
-			const lastAt = textBeforeCursor.lastIndexOf('@');
+			this.replaceTriggerTextInCurrentNode('@');
 			const data = item.data as { type: string; file: { path: string; name: string } } | undefined;
 			const file = data?.file;
 			
 			if (file?.path) {
-				// Create file attachment
 				const attachment = await this.contextService.createFileAttachment(file.path);
 				if (attachment) {
-					this.renderInputStateBar();
-					new Notice(`Attached: ${attachment.name}`);
+					this.insertInlineToken({
+						kind: 'attachment',
+						id: `attachment-${attachment.id}`,
+						label: attachment.name,
+						rawText: attachment.name,
+						removableId: attachment.id,
+					});
 				}
 			}
-			
-			// Remove the @ trigger text from input
-			newText = textBeforeCursor.substring(0, lastAt) + textAfterCursor;
-			newCursorPos = textBeforeCursor.substring(0, lastAt).length;
 		} else if (trigger === 'topic') {
-			// Replace #topic with the topic reference
-			const lastHash = textBeforeCursor.lastIndexOf('#');
-			newText = textBeforeCursor.substring(0, lastHash) + '#' + item.label + ' ' + textAfterCursor;
-			newCursorPos = textBeforeCursor.substring(0, lastHash).length + item.label.length + 2;
+			this.replaceTriggerTextInCurrentNode('#');
+			this.insertTextAtCursor(`#${item.label} `);
+		}
+		this.focusComposer();
+		this.refreshPlaceholderState();
+	}
+
+	private removeSlashCommandPreview(): void {
+		if (!this.inputEl) {
+			return;
 		}
 
-		this.inputEl.value = newText;
-		this.inputEl.focus();
-		this.inputEl.setSelectionRange(newCursorPos, newCursorPos);
+		const commandToken = this.inputEl.querySelector('[data-kind="command"]');
+		if (commandToken instanceof HTMLElement) {
+			commandToken.remove();
+			this.refreshPlaceholderState();
+			this.focusComposer();
+			return;
+		}
+
+		const value = this.getComposerText();
+		const match = value.match(/^(\s*)\/\S+\s*/);
+		if (!match) {
+			return;
+		}
+
+		this.setComposerText(value.slice(match[0].length));
+		this.focusComposer();
+		this.refreshAutocompleteFromInput();
+		this.refreshPlaceholderState();
 	}
 
 	/** Handle attach file button click */
@@ -2437,8 +2880,13 @@ export class ChatView extends ItemView {
 		if (selectedPath) {
 			const attachment = await this.contextService.createFileAttachment(selectedPath);
 			if (attachment) {
-				new Notice(`Attached: ${attachment.name}`);
-				this.renderInputStateBar();
+				this.insertInlineToken({
+					kind: 'attachment',
+					id: `attachment-${attachment.id}`,
+					label: attachment.name,
+					rawText: attachment.name,
+					removableId: attachment.id,
+				});
 			} else {
 				new Notice('Failed to attach file');
 			}
@@ -2539,8 +2987,13 @@ export class ChatView extends ItemView {
 		);
 
 		if (attachment) {
-			new Notice(`Attached selection (${attachment.size} bytes)`);
-			this.renderInputStateBar();
+			this.insertInlineToken({
+				kind: 'attachment',
+				id: `attachment-${attachment.id}`,
+				label: attachment.name,
+				rawText: attachment.name,
+				removableId: attachment.id,
+			});
 		}
 	}
 
@@ -2601,8 +3054,13 @@ export class ChatView extends ItemView {
 
 		const attachment = await this.contextService.createFileAttachment(activeFile.path);
 		if (attachment) {
-			new Notice(`Attached: ${attachment.name}`);
-			this.renderInputStateBar();
+			this.insertInlineToken({
+				kind: 'attachment',
+				id: `attachment-${attachment.id}`,
+				label: attachment.name,
+				rawText: attachment.name,
+				removableId: attachment.id,
+			});
 		} else {
 			new Notice('Failed to attach note');
 		}

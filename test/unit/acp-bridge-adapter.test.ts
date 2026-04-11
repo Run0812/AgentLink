@@ -435,5 +435,59 @@ describe('AcpBridgeAdapter', () => {
 				lastUpdatedAt: expect.any(Number),
 			});
 		});
+
+		it('detects ACP authentication-required errors', () => {
+			const internal = adapter as unknown as {
+				isAuthenticationRequiredError: (error: unknown) => boolean;
+			};
+
+			expect(internal.isAuthenticationRequiredError({ code: -32000 })).toBe(true);
+			expect(internal.isAuthenticationRequiredError({ error: { code: -32000 } })).toBe(true);
+			expect(internal.isAuthenticationRequiredError(new Error('Authentication required before session/new'))).toBe(true);
+			expect(internal.isAuthenticationRequiredError(new Error('Other failure'))).toBe(false);
+		});
+
+		it('authenticates and retries session creation when session/new requires auth', async () => {
+			const newSession = vi.fn()
+				.mockRejectedValueOnce({ code: -32000, message: 'auth_required' })
+				.mockResolvedValueOnce({
+					sessionId: 'session-2',
+					modes: {
+						currentModeId: 'code',
+						availableModes: [{ id: 'code', name: 'Code' }],
+					},
+				});
+			const authenticate = vi.fn().mockResolvedValue({});
+
+			const internal = adapter as unknown as {
+				connection: { newSession: typeof newSession; authenticate: typeof authenticate };
+				authMethods: Array<{ id: string; name: string }>;
+				createSession: () => Promise<void>;
+				sessionId: string | null;
+			};
+			internal.connection = { newSession, authenticate } as never;
+			internal.authMethods = [{ id: 'agent-login', name: 'Agent login' }];
+
+			await internal.createSession();
+
+			expect(authenticate).toHaveBeenCalledWith({ methodId: 'agent-login' });
+			expect(newSession).toHaveBeenCalledTimes(2);
+			expect(internal.sessionId).toBe('session-2');
+			expect(adapter.getCurrentMode()).toBe('code');
+		});
+
+		it('fails clearly when only unsupported auth methods are available', async () => {
+			const internal = adapter as unknown as {
+				authMethods: Array<{ id: string; name: string; type: string }>;
+				requestAuthenticationMethodSelection: () => Promise<unknown>;
+			};
+			internal.authMethods = [
+				{ id: 'env-auth', name: 'Environment auth', type: 'env_var' },
+			];
+
+			await expect(internal.requestAuthenticationMethodSelection()).rejects.toThrow(
+				'unsupported authentication methods',
+			);
+		});
 	});
 });

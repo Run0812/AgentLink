@@ -9,6 +9,223 @@
 
 ---
 
+## 2026-04-11 - 修复 inline token 仅能插入行首与样式过重
+
+**实现范围**:
+- inline token 插入定位
+- token 视觉降噪
+
+**完成内容**:
+- 将 trigger 替换逻辑改为优先使用最近一次有效的 composer 选区范围，避免点击自动完成后 token 回退到行首插入
+- 改进 `contenteditable` 文本节点定位逻辑，在光标落在元素容器节点时也能回退到正确的前后文本位置
+- 下调 inline token 的高度、内边距和圆角，移除边框，仅保留弱背景色区分，降低视觉侵入感
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+
+---
+
+## 2026-04-11 - 输入区切换为真正的 inline token composer
+
+**实现范围**:
+- `contenteditable` 输入区
+- inline 引用 / 命令 token
+- 自动完成插入链路改造
+
+**完成内容**:
+- 将输入区从 `textarea` 改为 `contenteditable` composer，引用文件和 `/command` 不再显示在输入框上方，而是以原子 token 节点直接嵌入文字流
+- `@` 文件、`@current note`、selection 和 `/command` 现在都会在光标位置插入 inline token，并保留独立删除能力
+- 发送消息时会序列化 inline token 为可读文本，同时继续通过 `attachments` 将文件上下文传给 agent，保证 UI 表现和 ACP 逻辑一致
+- 自动完成选择链路改为“保存并恢复编辑器选区”，避免点击 dropdown 后 token 插入到错误位置
+- 更新 `05-ui-ux.md` 和任务板，使文档与当前真实实现保持一致
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `.memory/01-tasks.md`
+- `.memory/05-ui-ux.md`
+
+---
+
+## 2026-04-11 - 输入区改为 composer shell，并同步 UI 文档
+
+**实现范围**:
+- 输入区 rich composer 布局
+- 输入区 chip 内嵌显示
+- UI/UX 文档同步
+
+**完成内容**:
+- 将原先“输入状态栏 + textarea + 独立底部工具栏”的三段式结构，重构为单一 `composer shell`
+- `@` 引用和当前 `/command` 现在显示在输入框内部顶部的 chip 行，不再出现在输入框外单独状态栏
+- 保持现有 `textarea`、发送逻辑、自动完成逻辑不变，仅重做输入区视觉结构，降低回归风险
+- 底部 Agent / Model / Context / Think / Send 工具栏移动到 composer shell 内部
+- 重写 `05-ui-ux.md`，将输入区设计更新为当前真实实现，并明确“当前仍基于 textarea，而不是 contenteditable”
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/components/input-state-bar.tsx`
+- `.memory/01-tasks.md`
+- `.memory/05-ui-ux.md`
+
+---
+
+## 2026-04-11 - 同步任务板与进度文档到当前代码状态
+
+**实现范围**:
+- `01-tasks.md` 状态校正
+- `02-progress.md` 进度同步
+
+**完成内容**:
+- 复核当前代码实现，确认 `registry icon` 回填、上下文 usage 指示器、标题栏结构清理、ACP 连接缓存与 `authenticate` 主链都已落地
+- 更新 `01-tasks.md`，将 Phase 6 完成度提升到与当前实现一致的状态，并补充已完成的上下文 usage 显示与 registry agent icon 显示
+- 清理 `01-tasks.md` 中已完成但仍重复出现在“待开发功能”的旧条目，保留真正未完成的底部工具栏 icon、扩展认证、README、mock 文案清理和富文本输入方案
+
+**相关文件**:
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+
+---
+
+## 2026-04-11 - 修复已注册 agent icon 未显示与标题栏旧图标残留
+
+**实现范围**:
+- 已配置 registry backend icon 回填
+- 标题栏按钮旧样式清理
+- 任务板同步
+
+**完成内容**:
+- 新增 `enrichBackendsFromRegistry()` 纯逻辑函数，在加载设置时用本地 ACP registry 为已存在的 registry backend 回填 `icon`、`version` 和 `registryAgentId`
+- 修复“已注册 agent 没有显示自己的 icon”问题；现有配置无需重建 backend，插件加载后会自动补全并持久化到设置文件
+- 清理 `ChatView` 标题栏按钮残留的旧 `innerHTML` 和重复样式覆盖，避免新的 `setIcon()` 图标再次被旧文本按钮样式污染
+- 更新 `01-tasks.md`，将 registry icon 回填和标题栏布局清理同步到任务板状态
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/main.ts`
+- `src/settings/settings.ts`
+- `src/ui/chat-view.ts`
+- `test/unit/settings.test.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-11 - 统一标题栏按钮图标并接入 registry agent icon
+
+**实现范围**:
+- 标题栏按钮图标风格
+- registry agent icon 透传
+- 标题栏双重下划线修复
+
+**完成内容**:
+- 标题栏右上角 3 个按钮改为 Obsidian `setIcon()` 线性图标，统一为同一视觉风格
+- `AcpBridgeBackendConfig` 新增 `icon` 字段，registry agent 的 icon 现在会写入 backend 配置并在聊天面板、agent 选择列表、agent 编辑信息卡中优先显示
+- registry 同步时会为已有注册 agent 回填/刷新 `icon` 和 `version`
+- 覆盖 header 容器默认边框和 padding，移除标题栏双重下划线，仅保留一条分隔线
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/core/types.ts`
+- `src/settings/registry-utils.ts`
+- `src/settings/settings.ts`
+- `src/settings/acp-agent-selector.ts`
+- `src/settings/acp-agent-editor.ts`
+- `src/ui/chat-view.ts`
+
+---
+
+## 2026-04-11 - 完成 `@` 与 `/` 的标签化预览渲染
+
+**实现范围**:
+- 输入状态栏标签预览
+- `/command` 预览解析
+- 引用渲染回归测试
+
+**完成内容**:
+- 保持 `textarea` 输入链路不变，采用 Phase 6 文档建议的分步方案，在输入状态栏中展示更明显的标签化预览
+- `@` 选择后的附件继续显示为标签，并与当前 `/command` 预览统一出现在输入状态栏
+- 新增当前 slash command 预览 chip，支持区分 built-in / agent，并支持点击删除同步清理输入框中的命令文本
+- 输入框内容变化、自动完成选择、发送消息、清空对话、切换会话时都会同步刷新标签预览
+- 新增 slash command preview 逻辑测试，覆盖 built-in、agent、未知命令与非命令输入
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/components/input-state-bar.tsx`
+- `src/ui/slash-command-utils.ts`
+- `test/unit/slash-commands.test.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-11 - 实现 ACP authenticate 主链
+
+**实现范围**:
+- ACP 认证错误处理
+- authenticate 调用链
+- 认证回归测试
+
+**完成内容**:
+- `AcpBridgeAdapter.initializeProtocol()` 现在会记录 agent 广播的 `authMethods`，并显式声明 `auth.terminal: false`
+- `createSession()` 现在能识别 ACP `Authentication required` 错误，在 `session/new` 失败后触发认证流程
+- 新增认证方式选择逻辑：对稳定的 agent auth method 弹出选择 UI，调用 `connection.authenticate()` 后自动重试创建 session
+- 对 UNSTABLE 的 `env_var` / `terminal` auth method 明确报“不支持”，避免假实现
+- 新增单测覆盖认证错误识别、认证后自动重试建 session、仅有不支持 auth method 时的失败路径
+
+**测试结果**:
+- `npm run lint`
+- `npm test`
+- `npm run build:quick`
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-11 - 校正任务板状态并重排剩余优先级
+
+**实现范围**:
+- `01-tasks.md` 状态校正
+- 剩余工作优先级整理
+
+**完成内容**:
+- 将任务板中已落地但仍标记为未完成的项目改为已完成，包括输入框快捷键、自动完成菜单快捷键冲突修复、`@` 自动附加、`@current note`、内建 `/clear` `/help` 及其测试
+- 将 `ACP authenticate`、引用标签化渲染、标题栏结构优化、icon 统一方案、README 重写提升为当前剩余重点
+- 将 `MockAdapter` 从“待实现”修正为“主流程已移除，残留文案待清理”
+- 更新 `01-tasks.md` 的 Phase 6 完成度和最后更新时间
+
+**相关文件**:
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-11 - 修复通用 dropdown 文本裁切与外部点击关闭
 
 **实现范围**:

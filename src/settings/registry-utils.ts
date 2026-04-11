@@ -45,6 +45,8 @@ export interface AgentLaunchConfig {
   name: string;
   /** Description */
   description: string;
+  /** Icon from registry */
+  icon?: string;
   /** Version from registry */
   registryVersion: string;
   /** Command to execute (e.g., 'kimi', 'npx', 'uvx') */
@@ -119,6 +121,7 @@ export function parseAgentLaunchConfig(agent: AcpRegistryAgent): AgentLaunchConf
       agentId: agent.id,
       name: agent.name,
       description: agent.description,
+      icon: agent.icon,
       registryVersion: agent.version,
       command: command,
       args: [...cmdParts.slice(1), ...(platformDist.args || [])],
@@ -136,6 +139,7 @@ export function parseAgentLaunchConfig(agent: AcpRegistryAgent): AgentLaunchConf
       agentId: agent.id,
       name: agent.name,
       description: agent.description,
+      icon: agent.icon,
       registryVersion: agent.version,
       command: 'npx',
       args: [dist.npx.package, ...(dist.npx.args || [])],
@@ -154,6 +158,7 @@ export function parseAgentLaunchConfig(agent: AcpRegistryAgent): AgentLaunchConf
       agentId: agent.id,
       name: agent.name,
       description: agent.description,
+      icon: agent.icon,
       registryVersion: agent.version,
       command: 'uvx',
       args: [dist.uvx.package, ...(dist.uvx.args || [])],
@@ -196,6 +201,8 @@ export function launchConfigToBackendConfig(config: AgentLaunchConfig): AgentBac
     name: config.name,
     command: config.command,
     args: config.args,
+    version: config.registryVersion,
+    icon: config.icon,
     registryAgentId: config.agentId,
   };
 }

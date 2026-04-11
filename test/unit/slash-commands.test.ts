@@ -4,7 +4,7 @@ import {
 	createAvailableCommandSuggestions,
 	createSlashCommandSuggestions,
 } from '../../src/ui/components/input-autocomplete';
-import { parseBuiltinSlashCommandPrompt } from '../../src/ui/slash-command-utils';
+import { getSlashCommandPreview, parseBuiltinSlashCommandPrompt } from '../../src/ui/slash-command-utils';
 
 describe('Slash Commands', () => {
 	describe('createSlashCommandSuggestions', () => {
@@ -118,6 +118,42 @@ describe('Slash Commands', () => {
 		it('returns null for non-builtin slash commands', () => {
 			expect(parseBuiltinSlashCommandPrompt('/web test')).toBeNull();
 			expect(parseBuiltinSlashCommandPrompt('/plan')).toBeNull();
+		});
+	});
+
+	describe('slash command preview', () => {
+		it('builds preview for builtin slash commands', () => {
+			expect(getSlashCommandPreview('/help topic')).toEqual({
+				commandId: 'help',
+				label: '/help',
+				description: 'Show available commands and shortcuts',
+				source: 'builtin',
+			});
+		});
+
+		it('builds preview for agent slash commands', () => {
+			expect(
+				getSlashCommandPreview('/plan tasks', [
+					{ name: 'plan', description: 'Show the plan', input: { hint: 'topic' } },
+				]),
+			).toEqual({
+				commandId: 'plan',
+				label: '/plan',
+				description: 'Show the plan (topic)',
+				source: 'agent',
+			});
+		});
+
+		it('falls back to a generic chip for unknown slash commands', () => {
+			expect(getSlashCommandPreview('/custom foo')).toEqual({
+				commandId: 'custom',
+				label: '/custom',
+				source: 'agent',
+			});
+		});
+
+		it('returns null when the input does not start with a slash command', () => {
+			expect(getSlashCommandPreview('plain text')).toBeNull();
 		});
 	});
 });

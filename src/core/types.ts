@@ -31,6 +31,11 @@ export interface AcpBridgeBackendConfig {
 	 */
 	version?: string;
 	/**
+	 * Icon from ACP registry when available.
+	 * Can be a text glyph or an image URL/data URL.
+	 */
+	icon?: string;
+	/**
 	 * Original registry agent ID.
 	 * Used to re-fetch registry info if needed.
 	 */

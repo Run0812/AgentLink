@@ -300,6 +300,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// Session
 	private sessionId: string | null = null;
 	private serverCapabilities: AgentCapability[] = [];
+	private authMethods: acp.AuthMethod[] = [];
 	private configOptions: ConfigOption[] = [];
 	private sessionModes: SessionModeOption[] = [];
 	private availableCommands: AvailableCommand[] = [];
@@ -892,6 +893,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			const response = await this.connection.initialize({
 				protocolVersion: acp.PROTOCOL_VERSION,
 				clientCapabilities: {
+					auth: {
+						terminal: false,
+					},
 					fs: {
 						readTextFile: true,
 						writeTextFile: true,
@@ -914,12 +918,10 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				console.log('[ACP Adapter] Capabilities:', this.serverCapabilities);
 			}
 
-			// Check if authentication is required
-			if (response.authMethods && response.authMethods.length > 0) {
+			this.authMethods = response.authMethods ?? [];
+			if (this.authMethods.length > 0) {
 				console.log('[ACP Adapter] Authentication methods available:', 
-					response.authMethods.map(m => m.name).join(', '));
-				
-				// TODO: 如果需要认证，调用 connection.authenticate()
+					this.authMethods.map((method) => method.name).join(', '));
 			}
 
 		} catch (error) {
@@ -944,27 +946,186 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				mcpServers: [],
 			});
 
-			this.sessionId = response.sessionId;
-			this.sessionModes = this.mapSessionModes(response.modes?.availableModes);
-			this.currentMode = response.modes?.currentModeId ?? null;
+			this.applySessionResponse(response);
 			console.log('[ACP Adapter] ✅ Session created!');
 			console.log('[ACP Adapter] Session ID:', this.sessionId);
-			console.log('[ACP Adapter] Current mode:', response.modes?.currentModeId);
-			console.log('[ACP Adapter] Current model:', response.models?.currentModelId);
-			console.log('[ACP Adapter] Available modes:', this.sessionModes.map((mode) => mode.id).join(', ') || '(none)');
-
-			// Store configOptions from session response (ACP Session Config Options)
-			const respAny = response as any;
-			if (respAny.configOptions && respAny.configOptions.length > 0) {
-				this.configOptions = this.mapConfigOptions(respAny.configOptions);
-				console.log('[ACP Adapter] Config options received:', this.describeConfigOptions(this.configOptions));
-			}
-			this.emitSessionStateChange();
 
 		} catch (error) {
 			console.error('[ACP Adapter] Create session failed:', error);
+			if (await this.tryAuthenticateAndCreateSession(error, cwd)) {
+				return;
+			}
 			throw error;
 		}
+	}
+
+	private applySessionResponse(response: acp.NewSessionResponse): void {
+		this.sessionId = response.sessionId;
+		this.sessionModes = this.mapSessionModes(response.modes?.availableModes);
+		this.currentMode = response.modes?.currentModeId ?? null;
+		console.log('[ACP Adapter] Current mode:', response.modes?.currentModeId);
+		console.log('[ACP Adapter] Current model:', response.models?.currentModelId);
+		console.log('[ACP Adapter] Available modes:', this.sessionModes.map((mode) => mode.id).join(', ') || '(none)');
+
+		const responseWithConfig = response as acp.NewSessionResponse & { configOptions?: unknown };
+		if (responseWithConfig.configOptions && Array.isArray(responseWithConfig.configOptions) && responseWithConfig.configOptions.length > 0) {
+			this.configOptions = this.mapConfigOptions(responseWithConfig.configOptions);
+			console.log('[ACP Adapter] Config options received:', this.describeConfigOptions(this.configOptions));
+		}
+		this.emitSessionStateChange();
+	}
+
+	private async tryAuthenticateAndCreateSession(error: unknown, cwd: string): Promise<boolean> {
+		if (!this.connection || !this.isAuthenticationRequiredError(error)) {
+			return false;
+		}
+
+		if (this.authMethods.length === 0) {
+			throw new Error('Agent requires authentication, but did not advertise any authentication methods.');
+		}
+
+		const method = await this.requestAuthenticationMethodSelection();
+		if (!method) {
+			throw new Error('Authentication cancelled.');
+		}
+
+		await this.authenticateWithMethod(method);
+
+		const response = await this.connection.newSession({
+			cwd,
+			mcpServers: [],
+		});
+		this.applySessionResponse(response);
+		console.log('[ACP Adapter] Session created after authentication:', response.sessionId);
+		return true;
+	}
+
+	private isAuthenticationRequiredError(error: unknown): boolean {
+		const record = error && typeof error === 'object' ? error as Record<string, unknown> : null;
+		const code = typeof record?.code === 'number'
+			? record.code
+			: record?.error && typeof record.error === 'object' && typeof (record.error as Record<string, unknown>).code === 'number'
+				? (record.error as Record<string, unknown>).code as number
+				: null;
+		if (code === -32000) {
+			return true;
+		}
+
+		const message = typeof record?.message === 'string'
+			? record.message
+			: record?.error && typeof record.error === 'object' && typeof (record.error as Record<string, unknown>).message === 'string'
+				? String((record.error as Record<string, unknown>).message)
+				: error instanceof Error
+					? error.message
+					: String(error ?? '');
+
+		return message.includes('auth_required') || message.toLowerCase().includes('authentication required');
+	}
+
+	private async authenticateWithMethod(method: acp.AuthMethod): Promise<void> {
+		if (!this.connection) {
+			throw new Error('Connection not established');
+		}
+
+		const methodType = 'type' in method && typeof method.type === 'string' ? method.type : 'agent';
+		if (methodType === 'env_var' || methodType === 'terminal') {
+			throw new Error(`Authentication method "${method.name}" (${methodType}) is not supported yet.`);
+		}
+
+		console.log('[ACP Adapter] Authenticating with method:', method.id, method.name);
+		const response = await this.connection.authenticate({ methodId: method.id });
+		console.log('[ACP Adapter] Authentication completed:', method.id, response?._meta ?? '(no meta)');
+	}
+
+	private getSupportedAuthMethods(): acp.AuthMethod[] {
+		return this.authMethods.filter((method) => {
+			const methodType = 'type' in method && typeof method.type === 'string' ? method.type : 'agent';
+			return methodType === 'agent';
+		});
+	}
+
+	private async requestAuthenticationMethodSelection(): Promise<acp.AuthMethod | null> {
+		const supportedMethods = this.getSupportedAuthMethods();
+		if (supportedMethods.length === 1) {
+			return supportedMethods[0];
+		}
+
+		if (supportedMethods.length === 0) {
+			const unsupportedNames = this.authMethods
+				.map((method) => `${method.name} (${('type' in method && typeof method.type === 'string') ? method.type : 'agent'})`)
+				.join(', ');
+			throw new Error(`Agent only advertised unsupported authentication methods: ${unsupportedNames}`);
+		}
+
+		const app = this.config.app;
+		if (!app) {
+			return null;
+		}
+
+		const { Modal, ButtonComponent } = await import('obsidian');
+
+		return new Promise((resolve) => {
+			let settled = false;
+			const finish = (method: acp.AuthMethod | null): void => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				resolve(method);
+			};
+
+			class AuthenticationModal extends Modal {
+				override onOpen(): void {
+					this.titleEl.setText('Authenticate agent');
+					this.contentEl.createEl('p', {
+						text: 'This agent requires authentication before a session can be created.',
+					});
+
+					const unsupportedMethods = (thisAuth.authMethods.filter((method) => !supportedMethods.includes(method)));
+					if (unsupportedMethods.length > 0) {
+						this.contentEl.createEl('p', {
+							text: `Unsupported methods: ${unsupportedMethods.map((method) => method.name).join(', ')}`,
+						});
+					}
+
+					const buttonRow = this.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
+					buttonRow.style.display = 'flex';
+					buttonRow.style.flexWrap = 'wrap';
+					buttonRow.style.gap = '0.5em';
+					buttonRow.style.marginTop = '1em';
+					buttonRow.style.justifyContent = 'flex-end';
+
+					new ButtonComponent(buttonRow)
+						.setButtonText('Cancel')
+						.onClick(() => {
+							finish(null);
+							this.close();
+						});
+
+					for (const method of supportedMethods) {
+						new ButtonComponent(buttonRow)
+							.setButtonText(method.name)
+							.onClick(() => {
+								finish(method);
+								this.close();
+							});
+
+						if (method.description) {
+							this.contentEl.createEl('p', {
+								text: `${method.name}: ${method.description}`,
+							});
+						}
+					}
+				}
+
+				override onClose(): void {
+					finish(null);
+				}
+			}
+
+			const thisAuth = this;
+			new AuthenticationModal(app).open();
+		});
 	}
 
 	private async establishConnection(): Promise<void> {
@@ -1502,6 +1663,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		this.connectionPromise = null;
 		this.serverCapabilities = [];
+		this.authMethods = [];
 		this.resetSessionState();
 		this.currentHandlers = null;
 		this.responseBuffer = [];

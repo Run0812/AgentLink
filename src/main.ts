@@ -13,8 +13,9 @@ import {
 	getActiveBackendConfig,
 	findBackendConfig,
 	createKimiBackendConfig,
+	enrichBackendsFromRegistry,
 } from './settings/settings';
-import { fetchAcpRegistry, saveLocalAcpRegistry } from './settings/registry-utils';
+import { fetchAcpRegistry, loadLocalAcpRegistry, saveLocalAcpRegistry } from './settings/registry-utils';
 import { AgentLinkSettingTab } from './settings/settings-tab';
 import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
@@ -116,6 +117,7 @@ export default class AgentLinkPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const loaded = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		let settingsChanged = false;
 
 		// Migration: ensure we always have at least one backend
 		if (!this.settings.backends || this.settings.backends.length === 0) {
@@ -128,6 +130,7 @@ export default class AgentLinkPlugin extends Plugin {
 			if (backend.type === 'acp-bridge' && 'bridgeCommand' in backend) {
 				// Migrate from old format to new format
 				const oldConfig = backend as any;
+				settingsChanged = true;
 				return {
 					type: 'acp-bridge' as const,
 					id: oldConfig.id,
@@ -141,12 +144,24 @@ export default class AgentLinkPlugin extends Plugin {
 			return backend;
 		});
 
+		const localRegistry = await loadLocalAcpRegistry(this.app);
+		const enrichedBackends = enrichBackendsFromRegistry(this.settings.backends, localRegistry);
+		if (enrichedBackends.changed) {
+			this.settings.backends = enrichedBackends.backends;
+			settingsChanged = true;
+		}
+
 		// Ensure active backend exists
 		const activeExists = this.settings.backends.some(
 			b => b.id === this.settings.activeBackendId
 		);
 		if (!activeExists && this.settings.backends.length > 0) {
 			this.settings.activeBackendId = this.settings.backends[0].id;
+			settingsChanged = true;
+		}
+
+		if (settingsChanged) {
+			await this.saveData(this.settings);
 		}
 	}
 
