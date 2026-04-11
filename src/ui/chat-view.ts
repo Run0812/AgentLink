@@ -2594,13 +2594,14 @@ export class ChatView extends ItemView {
 		}
 		token.style.display = 'inline-flex';
 		token.style.alignItems = 'center';
-		token.style.gap = '0.22rem';
-		token.style.margin = '0 0.08rem';
-		token.style.padding = '0.02rem 0.28rem';
-		token.style.borderRadius = '4px';
+		token.style.gap = '0.18rem';
+		token.style.margin = '0 0.04rem';
+		token.style.padding = '0.06rem 0.24rem';
+		token.style.borderRadius = '3px';
 		token.style.verticalAlign = 'baseline';
 		token.style.maxWidth = '260px';
 		token.style.border = 'none';
+		token.style.lineHeight = '1.35';
 		token.style.background = config.kind === 'command'
 			? 'var(--background-modifier-hover)'
 			: 'var(--background-modifier-hover)';
@@ -2616,7 +2617,7 @@ export class ChatView extends ItemView {
 		label.style.textOverflow = 'ellipsis';
 		label.style.whiteSpace = 'nowrap';
 		label.style.fontSize = '0.76rem';
-		label.style.lineHeight = '1.2';
+		label.style.lineHeight = '1.35';
 		token.appendChild(label);
 
 		const remove = document.createElement('button');
@@ -2624,13 +2625,22 @@ export class ChatView extends ItemView {
 		remove.textContent = '×';
 		remove.style.background = 'transparent';
 		remove.style.border = 'none';
+		remove.style.boxShadow = 'none';
+		remove.style.outline = 'none';
+		remove.style.appearance = 'none';
+		remove.style.webkitAppearance = 'none';
 		remove.style.color = 'inherit';
 		remove.style.cursor = 'pointer';
 		remove.style.padding = '0';
 		remove.style.margin = '0';
+		remove.style.minWidth = '0';
+		remove.style.width = 'auto';
+		remove.style.height = 'auto';
 		remove.style.fontSize = '0.7rem';
-		remove.style.lineHeight = '1';
-		remove.style.opacity = '0.7';
+		remove.style.lineHeight = '1.1';
+		remove.style.opacity = '0';
+		remove.style.pointerEvents = 'none';
+		remove.style.transition = 'opacity 120ms ease';
 		remove.addEventListener('click', (evt) => {
 			evt.preventDefault();
 			evt.stopPropagation();
@@ -2640,6 +2650,22 @@ export class ChatView extends ItemView {
 			token.remove();
 			this.refreshPlaceholderState();
 			this.focusComposer();
+		});
+		token.addEventListener('mouseenter', () => {
+			remove.style.opacity = '0.72';
+			remove.style.pointerEvents = 'auto';
+		});
+		token.addEventListener('mouseleave', () => {
+			remove.style.opacity = '0';
+			remove.style.pointerEvents = 'none';
+		});
+		remove.addEventListener('focus', () => {
+			remove.style.opacity = '0.72';
+			remove.style.pointerEvents = 'auto';
+		});
+		remove.addEventListener('blur', () => {
+			remove.style.opacity = '0';
+			remove.style.pointerEvents = 'none';
 		});
 		token.appendChild(remove);
 
