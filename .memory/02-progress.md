@@ -9,6 +9,33 @@
 
 ---
 
+## 2026-04-10 - 补齐 ACP 文件系统与权限能力
+
+**实现范围**:
+- ACP 文件读写
+- permission UI
+- terminal 能力声明
+
+**完成内容**:
+- 新增 `vault-paths` helper，支持 ACP 绝对路径映射到 vault 相对路径，并拦截越出 vault 的路径
+- `readTextFile` / `writeTextFile` 现在使用统一路径解析；写入新文件前会自动创建父目录
+- `readTextFile` 补充 `line` / `limit` 的内容切片支持
+- `requestPermission` 不再自动选第一个选项；现在会弹出真实权限选择 UI，并返回用户选中的 `optionId`
+- 停止向 Agent 宣称 `terminal: true`，避免当前 stub 实现误导 Agent 触发不可用能力
+
+**测试结果**:
+- 新增 `vault-paths` 单测，覆盖绝对路径映射、越界拒绝、自动建目录与按行读取切片
+- 新增 ACP permission 测试，覆盖“批准指定选项”和“取消请求”
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/services/vault-paths.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+- `test/unit/vault-paths.test.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-10 - 修复新对话 ACP 预连接与会话预热链路
 
 **实现范围**:

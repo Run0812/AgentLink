@@ -586,10 +586,11 @@ export class ChatView extends ItemView {
 		// Get configOptions from adapter (may be empty if not supported)
 		const configOptions = this.adapter?.getConfigOptions?.() ?? [];
 		this.sessionConfig = { configOptions };
+		const toolbarOptions = configOptions.filter((option) => option.category !== 'model');
 
 		render(
 			h(ConfigToolbar, {
-				options: configOptions,
+				options: toolbarOptions,
 				onSelect: async (configId: string, value: string | boolean) => {
 					await this.handleConfigOptionChange(configId, value);
 				},

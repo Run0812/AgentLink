@@ -33,7 +33,7 @@ describe('AcpBridgeAdapter', () => {
 			expect(caps).toContain('file_read');
 			expect(caps).toContain('file_write');
 			expect(caps).toContain('file_edit');
-			expect(caps).toContain('terminal');
+			expect(caps).not.toContain('terminal');
 		});
 	});
 
@@ -347,6 +347,59 @@ describe('AcpBridgeAdapter', () => {
 					options: [{ value: 'ask', name: 'Ask', description: 'Safe mode' }],
 				},
 			]);
+		});
+
+		it('returns the selected permission option from the UI callback', async () => {
+			adapter.setCallbacks({
+				onPermissionRequest: (_toolCall, options, resolve) => {
+					resolve({ approved: true, optionId: options[1]?.optionId });
+				},
+			});
+
+			const response = await adapter.handlePermissionRequest({
+				sessionId: 'session-1',
+				toolCall: {
+					toolCallId: 'call-1',
+					toolName: 'write_file',
+					title: 'Write review.md',
+					arguments: JSON.stringify({ path: 'review.md' }),
+				},
+				options: [
+					{ optionId: 'deny', name: 'Deny', kind: 'reject' },
+					{ optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+				],
+			} as never);
+
+			expect(response).toEqual({
+				outcome: {
+					outcome: 'selected',
+					optionId: 'allow',
+				},
+			});
+		});
+
+		it('cancels permission requests when the UI rejects them', async () => {
+			adapter.setCallbacks({
+				onPermissionRequest: (_toolCall, _options, resolve) => {
+					resolve({ approved: false });
+				},
+			});
+
+			const response = await adapter.handlePermissionRequest({
+				sessionId: 'session-1',
+				toolCall: {
+					toolCallId: 'call-2',
+					toolName: 'write_file',
+					title: 'Write review.md',
+				},
+				options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+			} as never);
+
+			expect(response).toEqual({
+				outcome: {
+					outcome: 'cancelled',
+				},
+			});
 		});
 	});
 });

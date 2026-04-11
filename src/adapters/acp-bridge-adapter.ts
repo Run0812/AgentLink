@@ -33,7 +33,7 @@ import {
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
 import { ProcessManager } from '../services/process-manager';
-import { ToolExecutor } from '../services/tool-executor';
+import { ensureVaultParentFolders, resolveVaultRelativePath, sliceFileContent } from '../services/vault-paths';
 
 // ============================================================================
 // Adapter Configuration (using shared types)
@@ -164,21 +164,7 @@ class AgentLinkAcpClient implements acp.Client {
 		console.log('[ACP Client] Tool call:', JSON.stringify(params.toolCall, null, 2));
 		console.log('[ACP Client] Options:', params.options);
 
-		// TODO: 显示 UI 让用户选择
-		// 暂时自动选择第一个选项
-		if (params.options.length > 0) {
-			const selectedOption = params.options[0];
-			console.log('[ACP Client] Auto-selecting option:', selectedOption.name);
-			
-			return {
-				outcome: {
-					outcome: 'selected' as const,
-					optionId: selectedOption.optionId,
-				},
-			};
-		}
-
-		return { outcome: { outcome: 'cancelled' as const } };
+		return this.adapter.handlePermissionRequest(params);
 	}
 
 	/**
@@ -196,8 +182,7 @@ class AgentLinkAcpClient implements acp.Client {
 		}
 
 		try {
-			// Normalize path and read from vault
-			const normalizedPath = params.path.replace(/^\//, '');
+			const normalizedPath = resolveVaultRelativePath(this.app, params.path);
 			const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 			
 			if (!file || !('extension' in file)) {
@@ -205,9 +190,10 @@ class AgentLinkAcpClient implements acp.Client {
 			}
 
 			const content = await this.app.vault.read(file as TFile);
-			console.log('[ACP Client] File read success, length:', content.length);
+			const slicedContent = sliceFileContent(content, params.line ?? undefined, params.limit ?? undefined);
+			console.log('[ACP Client] File read success, length:', slicedContent.length);
 			
-			return { content };
+			return { content: slicedContent };
 		} catch (error) {
 			console.error('[ACP Client] Read file failed:', error);
 			throw error;
@@ -230,7 +216,7 @@ class AgentLinkAcpClient implements acp.Client {
 		}
 
 		try {
-			const normalizedPath = params.path.replace(/^\//, '');
+			const normalizedPath = resolveVaultRelativePath(this.app, params.path);
 			const existing = this.app.vault.getAbstractFileByPath(normalizedPath);
 			
 			if (existing && 'extension' in existing) {
@@ -239,6 +225,7 @@ class AgentLinkAcpClient implements acp.Client {
 				console.log('[ACP Client] File updated successfully');
 			} else {
 				// Create new file
+				await ensureVaultParentFolders(this.app, normalizedPath);
 				await this.app.vault.create(normalizedPath, params.content);
 				console.log('[ACP Client] File created successfully');
 			}
@@ -297,6 +284,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private state: AgentStatusState = 'disconnected';
 	private bridgeProcess: ChildProcess | null = null;
 	private processManager = new ProcessManager();
+	private callbacks: AcpAdapterCallbacks = {};
 	
 	// SDK 连接
 	private connection: acp.ClientSideConnection | null = null;
@@ -332,6 +320,10 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	updateConfig(config: Partial<AcpBridgeAdapterConfig>): void {
 		this.config = { ...this.config, ...config };
 		console.log('[ACP Adapter] Config updated');
+	}
+
+	setCallbacks(callbacks: Partial<AcpAdapterCallbacks>): void {
+		this.callbacks = { ...this.callbacks, ...callbacks };
 	}
 
 	subscribeSessionState(listener: () => void): () => void {
@@ -504,7 +496,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		if (this.serverCapabilities.length > 0) {
 			return this.serverCapabilities;
 		}
-		return ['chat', 'file_read', 'file_write', 'file_edit', 'terminal'];
+		return ['chat', 'file_read', 'file_write', 'file_edit'];
 	}
 
 	// ── Skills (ACP Skills) ────────────────────────────────────────────────
@@ -628,6 +620,29 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	getPendingToolCalls(): Array<{ id: string; name: string; arguments: Record<string, unknown> }> {
 		return [];
+	}
+
+	async handlePermissionRequest(
+		params: acp.RequestPermissionRequest,
+	): Promise<acp.RequestPermissionResponse> {
+		if (params.options.length === 0) {
+			return { outcome: { outcome: 'cancelled' } };
+		}
+
+		const toolCall = this.mapPermissionToolCall(params.toolCall);
+		const selectedOptionId = await this.requestPermissionSelection(toolCall, params.options);
+		if (!selectedOptionId) {
+			console.log('[ACP Adapter] Permission request cancelled');
+			return { outcome: { outcome: 'cancelled' } };
+		}
+
+		console.log('[ACP Adapter] Permission option selected:', selectedOptionId);
+		return {
+			outcome: {
+				outcome: 'selected',
+				optionId: selectedOptionId,
+			},
+		};
 	}
 
 	// ── Internal Methods (called by AgentLinkAcpClient) ──────────────────────
@@ -854,7 +869,6 @@ export class AcpBridgeAdapter implements AgentAdapter {
 						readTextFile: true,
 						writeTextFile: true,
 					},
-					terminal: true,
 				},
 				clientInfo: {
 					name: 'AgentLink',
@@ -994,9 +1008,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			console.log('[ACP Adapter] Agent supports MCP:', acpCaps.mcpCapabilities);
 		}
 
-		// We support fs and terminal as a client, so we always add them
-		// (these are client capabilities, not agent capabilities)
-		capabilities.push('file_read', 'file_write', 'file_edit', 'terminal');
+		// We support filesystem methods as a client, so expose matching capabilities.
+		capabilities.push('file_read', 'file_write', 'file_edit');
 
 		return capabilities;
 	}
@@ -1011,6 +1024,123 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		}
 
 		return null;
+	}
+
+	private mapPermissionToolCall(toolCall: unknown): { id: string; tool: string; params: Record<string, unknown>; title: string } {
+		const toolCallRecord = (toolCall && typeof toolCall === 'object' ? toolCall : {}) as Record<string, unknown>;
+		const rawParams = toolCallRecord.arguments ?? toolCallRecord.params;
+		let params: Record<string, unknown> = {};
+
+		if (rawParams && typeof rawParams === 'object') {
+			params = rawParams as Record<string, unknown>;
+		} else if (typeof rawParams === 'string') {
+			try {
+				params = JSON.parse(rawParams) as Record<string, unknown>;
+			} catch {
+				params = { raw: rawParams };
+			}
+		}
+
+		return {
+			id: typeof toolCallRecord.toolCallId === 'string'
+				? toolCallRecord.toolCallId
+				: typeof toolCallRecord.id === 'string'
+					? toolCallRecord.id
+					: 'permission-request',
+			tool: typeof toolCallRecord.toolName === 'string'
+				? toolCallRecord.toolName
+				: typeof toolCallRecord.tool === 'string'
+					? toolCallRecord.tool
+					: 'unknown',
+			params,
+			title: typeof toolCallRecord.title === 'string'
+				? toolCallRecord.title
+				: typeof toolCallRecord.toolName === 'string'
+					? toolCallRecord.toolName
+					: 'Permission request',
+		};
+	}
+
+	private async requestPermissionSelection(
+		toolCall: { id: string; tool: string; params: Record<string, unknown>; title: string },
+		options: Array<{ optionId: string; name: string; kind: string }>,
+	): Promise<string | null> {
+		if (this.callbacks.onPermissionRequest) {
+			return new Promise((resolve) => {
+				this.callbacks.onPermissionRequest?.(toolCall, options, (outcome) => {
+					resolve(outcome.approved ? outcome.optionId ?? null : null);
+				});
+			});
+		}
+
+		return this.showPermissionModal(toolCall, options);
+	}
+
+	private async showPermissionModal(
+		toolCall: { id: string; tool: string; params: Record<string, unknown>; title: string },
+		options: Array<{ optionId: string; name: string; kind: string }>,
+	): Promise<string | null> {
+		const app = this.config.app;
+		if (!app) {
+			return Promise.resolve(null);
+		}
+
+		const { Modal, ButtonComponent } = await import('obsidian');
+
+		return new Promise((resolve) => {
+			let settled = false;
+			const finish = (selectedOptionId: string | null): void => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				resolve(selectedOptionId);
+			};
+
+			class PermissionModal extends Modal {
+				override onOpen(): void {
+					this.titleEl.setText(toolCall.title || 'Permission request');
+					this.contentEl.createEl('p', {
+						text: `Agent wants permission to run "${toolCall.tool}".`,
+					});
+
+					if (Object.keys(toolCall.params).length > 0) {
+						this.contentEl.createEl('pre', {
+							text: JSON.stringify(toolCall.params, null, 2),
+						});
+					}
+
+					const buttonRow = this.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
+					buttonRow.style.display = 'flex';
+					buttonRow.style.flexWrap = 'wrap';
+					buttonRow.style.gap = '0.5em';
+					buttonRow.style.marginTop = '1em';
+					buttonRow.style.justifyContent = 'flex-end';
+
+					new ButtonComponent(buttonRow)
+						.setButtonText('Cancel')
+						.onClick(() => {
+							finish(null);
+							this.close();
+						});
+
+					for (const option of options) {
+						new ButtonComponent(buttonRow)
+							.setButtonText(option.name)
+							.onClick(() => {
+								finish(option.optionId);
+								this.close();
+							});
+					}
+				}
+
+				override onClose(): void {
+					finish(null);
+				}
+			}
+
+			new PermissionModal(app).open();
+		});
 	}
 
 	private getWorkingDirectory(): string {
