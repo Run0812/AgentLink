@@ -1,0 +1,146 @@
+name: Tag Release
+
+on:
+  push:
+    tags:
+      # Matches x.y.z – no "v" prefix, per Obsidian community plugin convention
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write   # required to create GitHub Releases
+
+jobs:
+  release:
+    name: Validate, Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history so git log works for release notes
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # ── Extract tag ────────────────────────────────────────────────────
+      - name: Extract tag version
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "Tag: $TAG"
+          # Validate format
+          if ! echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ Tag '$TAG' does not match x.y.z format"
+            exit 1
+          fi
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      # ── Version consistency checks ────────────────────────────────────
+      - name: Verify manifest.json version == tag
+        run: |
+          TAG="${{ steps.tag.outputs.version }}"
+          MAN=$(node -p "require('./manifest.json').version")
+          if [ "$MAN" != "$TAG" ]; then
+            echo "❌ manifest.json version ($MAN) does not match tag ($TAG)"
+            echo "   Please update manifest.json before tagging."
+            exit 1
+          fi
+          echo "✅ manifest.json version matches tag: $MAN"
+
+      - name: Verify package.json version == tag
+        run: |
+          TAG="${{ steps.tag.outputs.version }}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$PKG" != "$TAG" ]; then
+            echo "❌ package.json version ($PKG) does not match tag ($TAG)"
+            echo "   Please update package.json before tagging."
+            exit 1
+          fi
+          echo "✅ package.json version matches tag: $PKG"
+
+      # ── Install ────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Lint / Typecheck ───────────────────────────────────────────────
+      - name: Typecheck / Lint
+        run: npm run lint
+
+      # ── Test ───────────────────────────────────────────────────────────
+      - name: Test
+        run: npm run test
+
+      # ── Build ──────────────────────────────────────────────────────────
+      - name: Build
+        run: npm run build:quick
+
+      # ── Verify release artifacts ───────────────────────────────────────
+      - name: Verify release artifacts
+        id: artifacts
+        run: |
+          for f in build/main.js build/manifest.json; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Required artifact missing: $f"
+              exit 1
+            fi
+            echo "✅ $f ($(du -sh "$f" | cut -f1))"
+          done
+          if [ -f "build/styles.css" ]; then
+            echo "✅ build/styles.css ($(du -sh build/styles.css | cut -f1))"
+            echo "has_styles=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ℹ️  styles.css not present (optional)"
+            echo "has_styles=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Generate release notes ─────────────────────────────────────────
+      - name: Generate release notes
+        id: notes
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          # Find the previous semver tag (if any)
+          PREV=$(git tag --sort=-version:refname \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -v "^${VERSION}$" \
+            | head -1 || echo "")
+
+          {
+            echo "notes<<RELEASE_NOTES_EOF"
+            if [ -n "$PREV" ]; then
+              echo "## What's Changed since ${PREV}"
+              git log "${PREV}..HEAD" \
+                --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" \
+                --no-merges
+            else
+              echo "## Initial Release"
+              git log HEAD \
+                --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" \
+                --no-merges | head -30
+            fi
+            echo ""
+            echo ""
+            echo "## Installation"
+            echo "Download \`main.js\` and \`manifest.json\` (and optionally \`styles.css\`) into your vault's \`.obsidian/plugins/agentlink/\` directory."
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── Create GitHub Release ─────────────────────────────────────────
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.tag.outputs.version }}"
+          HAS_STYLES="${{ steps.artifacts.outputs.has_styles }}"
+
+          ASSETS="build/main.js build/manifest.json"
+          if [ "$HAS_STYLES" = "true" ]; then
+            ASSETS="$ASSETS build/styles.css"
+          fi
+
+          gh release create "$VERSION" \
+            --title "AgentLink ${VERSION}" \
+            --notes "${{ steps.notes.outputs.notes }}" \
+            $ASSETS

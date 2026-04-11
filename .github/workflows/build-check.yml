@@ -1,0 +1,152 @@
+name: Build Check (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to validate (e.g. 1.2.3). Leave empty to read from package.json.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build-check:
+    name: Pre-Release Build Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      # ── Resolve version ────────────────────────────────────────────────
+      - name: Resolve target version
+        id: version
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            TARGET="$INPUT"
+            echo "Using input version: $TARGET"
+          else
+            TARGET=$(node -p "require('./package.json').version")
+            echo "Using package.json version: $TARGET"
+          fi
+          echo "version=$TARGET" >> "$GITHUB_OUTPUT"
+
+      # ── Validate version format ────────────────────────────────────────
+      - name: Validate version format (x.y.z)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "❌ Version '$VERSION' does not match x.y.z format"
+            exit 1
+          fi
+          echo "✅ Version format OK: $VERSION"
+
+      # ── Cross-check package.json ↔ manifest.json ──────────────────────
+      - name: Verify package.json == manifest.json version
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          MAN=$(node -p "require('./manifest.json').version")
+          TARGET="${{ steps.version.outputs.version }}"
+
+          echo "package.json  : $PKG"
+          echo "manifest.json : $MAN"
+          echo "Target        : $TARGET"
+
+          if [ "$PKG" != "$MAN" ]; then
+            echo "❌ package.json ($PKG) and manifest.json ($MAN) versions differ"
+            exit 1
+          fi
+          if [ "$PKG" != "$TARGET" ]; then
+            echo "❌ package.json ($PKG) does not match target version ($TARGET)"
+            exit 1
+          fi
+          echo "✅ Version consistency OK"
+
+      # ── Install ────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Lint / Typecheck ───────────────────────────────────────────────
+      - name: Typecheck / Lint
+        run: npm run lint
+
+      # ── Test ───────────────────────────────────────────────────────────
+      - name: Test
+        run: npm run test
+
+      # ── Build ──────────────────────────────────────────────────────────
+      - name: Build
+        run: npm run build:quick
+
+      # ── Verify release artifacts ───────────────────────────────────────
+      - name: Verify release artifacts
+        id: artifacts
+        run: |
+          MISSING=0
+          for f in build/main.js build/manifest.json; do
+            if [ -f "$f" ]; then
+              SIZE=$(du -sh "$f" | cut -f1)
+              echo "✅ $f ($SIZE)"
+            else
+              echo "❌ Missing: $f"
+              MISSING=1
+            fi
+          done
+          if [ -f "build/styles.css" ]; then
+            SIZE=$(du -sh build/styles.css | cut -f1)
+            echo "✅ build/styles.css ($SIZE)"
+            echo "has_styles=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ℹ️  styles.css not found (optional)"
+            echo "has_styles=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$MISSING" -eq 1 ]; then
+            echo "❌ One or more required artifacts are missing"
+            exit 1
+          fi
+          echo "✅ All required artifacts present"
+
+      # ── Upload artifact ────────────────────────────────────────────────
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentlink-${{ steps.version.outputs.version }}-preview
+          path: |
+            build/main.js
+            build/manifest.json
+            build/styles.css
+          if-no-files-found: warn
+          retention-days: 7
+
+      # ── Release notes preview ──────────────────────────────────────────
+      - name: Generate release notes preview
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "")
+
+          echo "## Release Notes Preview — v${VERSION}"
+          echo ""
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "### Changes since ${PREV_TAG}"
+            git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges || true
+          else
+            echo "### All commits (no previous tag found)"
+            git log --pretty=format:"- %s (%h)" --no-merges | head -30 || true
+          fi
+
+          echo ""
+          echo ""
+          echo "### Assets"
+          echo "- \`main.js\`"
+          echo "- \`manifest.json\`"
+          if [ "${{ steps.artifacts.outputs.has_styles }}" = "true" ]; then
+            echo "- \`styles.css\`"
+          fi
