@@ -18,6 +18,11 @@ const token    = process.env.GITHUB_TOKEN;
 const repo     = process.env.REPO;
 const prNumber = process.env.PR_NUMBER;
 
+/** Maximum diff characters sent to the model (keeps cost and latency reasonable). */
+const MAX_DIFF_LENGTH = 10000;
+/** Token budget for the model response. */
+const MAX_TOKENS = 4096;
+
 if (!apiKey) {
   console.log('ANTHROPIC_API_KEY not configured – AI review skipped.');
   process.exit(0);
@@ -45,7 +50,9 @@ async function main() {
 
   // Truncate to stay within Claude context limits
   const truncated =
-    diff.length > 10000 ? diff.slice(0, 10000) + '\n\n... (diff truncated)' : diff;
+    diff.length > MAX_DIFF_LENGTH
+      ? diff.slice(0, MAX_DIFF_LENGTH) + '\n\n... (diff truncated)'
+      : diff;
 
   // ── Build prompt ─────────────────────────────────────────────────
   const prompt = [
@@ -89,7 +96,7 @@ async function main() {
     },
     body: JSON.stringify({
       model: 'claude-3-5-haiku-20241022',
-      max_tokens: 1024,
+      max_tokens: MAX_TOKENS,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
