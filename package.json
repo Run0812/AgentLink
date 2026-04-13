@@ -32,6 +32,7 @@
     "@emnapi/runtime": "^1.9.2",
     "@types/node": "^20.19.0",
     "esbuild": "^0.27.0",
+    "obsidian": "latest",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   },
