@@ -9,6 +9,33 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I7：memory 文档收口与最终验收
+
+**实现范围**:
+- `01/02/03` memory 文档同步
+- 架构模块化 v1 最终门禁执行与验收记录
+
+**完成内容**:
+- `01-tasks.md` 标记 I7 完成，架构模块化 I1-I7 全部闭环
+- `03-bugs.md` 增补“架构模块化 v1 验收”记录（本轮未发现新增严重缺陷）
+- 对本轮迭代 commit 链路完成归档，可按 commit 粒度执行 `git revert` 回退
+
+**最终门禁结果**:
+- `npm run lint` 通过
+- `npm test` 通过（11 files, 101 tests）
+- `npm run build:quick` 通过
+
+**验收结论**:
+- 设置/聊天/ACP 主要行为保持可用
+- `settings-tab`、`chat-view`、`acp-bridge-adapter` 代码职责已明显收敛为编排层 + 子模块
+
+**相关文件**:
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+- `.memory/03-bugs.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I6：UI 工程化收口（重复 inline style 迁移）
 
 **实现范围**:
