@@ -5,6 +5,7 @@ import { getBackendTypeLabel, generateBackendId, createAcpBridgeBackendConfig, m
 import { fetchAcpRegistry } from './registry-utils';
 import { AcpAgentEditorModal } from './acp-agent-editor';
 import { LocalAgentScanModal } from './local-agent-scanner';
+import { SettingsPatch } from './settings-store';
 
 export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
@@ -21,8 +22,24 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	private buildCurrentSettingsPatch(): SettingsPatch {
+		return {
+			...this.plugin.settings,
+			backends: this.plugin.settings.backends.map((backend) => ({ ...backend })),
+		};
+	}
+
+	private async applyCurrentSettings(options?: {
+		rebuildAdapter?: boolean;
+		persist?: boolean;
+		refreshView?: boolean;
+		updateHistoryExpiry?: boolean;
+	}): Promise<void> {
+		await this.plugin.applySettingsPatch(this.buildCurrentSettingsPatch(), options);
+	}
+
 	private async saveSettingsNoRebuild(): Promise<void> {
-		await this.plugin.saveSettings({ rebuildAdapter: false });
+		await this.applyCurrentSettings({ rebuildAdapter: false });
 	}
 
 	private scheduleSettingsSave(options?: { rebuildAdapter?: boolean }, delayMs = 250): void {
@@ -32,7 +49,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 		this.delayedSaveHandle = setTimeout(() => {
 			this.delayedSaveHandle = null;
-			void this.plugin.saveSettings(options).catch((error) => {
+			void this.applyCurrentSettings(options).catch((error) => {
 				const message = error instanceof Error ? error.message : String(error);
 				new Notice(`Failed to save settings: ${message}`);
 			});
@@ -168,7 +185,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				new LocalAgentScanModal(this.app, this.plugin.settings.backends, async (agent) => {
 					this.plugin.settings.backends.push(agent);
 					this.plugin.settings.activeBackendId = agent.id;
-					await this.plugin.saveSettings();
+					await this.applyCurrentSettings();
 					this.display();
 					new Notice(`Added ${agent.name}`);
 				}).open();
@@ -248,7 +265,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		checkbox.style.cursor = 'pointer';
 		checkbox.addEventListener('change', async () => {
 			backend.enabled = checkbox.checked;
-			await this.plugin.saveSettings();
+			await this.applyCurrentSettings();
 			this.display();
 		});
 
@@ -304,7 +321,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				.setCta()
 				.onClick(async () => {
 					this.plugin.settings.activeBackendId = backend.id;
-					await this.plugin.saveSettings();
+					await this.applyCurrentSettings();
 					this.display();
 					new Notice(`Switched to ${backend.name}`);
 				});
@@ -320,7 +337,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 						const index = this.plugin.settings.backends.findIndex(b => b.id === updatedConfig.id);
 						if (index !== -1) {
 							this.plugin.settings.backends[index] = updatedConfig;
-							await this.plugin.saveSettings();
+							await this.applyCurrentSettings();
 							this.display();
 						}
 					}).open();
@@ -342,7 +359,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.onClick(async () => {
 				if (!canDelete) return;
 				this.plugin.settings.backends = this.plugin.settings.backends.filter(b => b.id !== backend.id);
-				await this.plugin.saveSettings();
+				await this.applyCurrentSettings();
 				this.display();
 			});
 	}
@@ -496,7 +513,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 								const { backends, lastSync } = await mergeAcpRegistryIntoSettings(this.app, this.plugin.settings);
 								this.plugin.settings.backends = backends;
 								this.plugin.settings.lastAcpRegistrySync = lastSync;
-								await this.plugin.saveSettings();
+								await this.applyCurrentSettings();
 								new Notice(`Synced ${result.agents?.length || 0} ACP agents from registry`);
 								this.display();
 							}
@@ -906,7 +923,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			this.plugin.settings.backends.push(newBackend);
 			// Auto-switch to new backend
 			this.plugin.settings.activeBackendId = id;
-			await this.plugin.saveSettings();
+			await this.applyCurrentSettings();
 			this.display();
 		}).open();
 	}
@@ -961,7 +978,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					}
 				}
 
-				await this.plugin.saveSettings();
+				await this.applyCurrentSettings();
 				this.display();
 				new Notice(`Imported ${addedCount} backends (${skippedCount} skipped as duplicates)`);
 			} catch (error) {

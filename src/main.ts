@@ -22,10 +22,26 @@ import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-
 import { SessionManager } from './services/session-manager';
 import { AcpAdapterPool } from './services/acp-adapter-pool';
 import { loadStoredSettings, saveStoredSettings } from './services/plugin-data-storage';
+import {
+	createSettingsEffectFlags,
+	PluginSettingsEffects,
+	SettingsEffectFlags,
+	SettingsEffects,
+} from './settings/settings-effects';
+import { InMemorySettingsStore, SettingsPatch, SettingsStore } from './settings/settings-store';
+
+interface ApplySettingsPatchOptions {
+	rebuildAdapter?: boolean;
+	refreshView?: boolean;
+	persist?: boolean;
+	updateHistoryExpiry?: boolean;
+}
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
 	private adapter: AgentAdapter | null = null;
+	private settingsStore!: SettingsStore;
+	private settingsEffects!: SettingsEffects;
 	private readonly adapterPool = new AcpAdapterPool({
 		createAdapter: (config) => new AcpBridgeAdapter(config),
 	});
@@ -40,6 +56,7 @@ export default class AgentLinkPlugin extends Plugin {
 		this.sessionManager = new SessionManager(this);
 		await this.sessionManager.initialize();
 		await this.sessionManager.setHistoryExpiryDays(this.settings.sessionHistoryExpiryDays);
+		this.settingsEffects = this.createSettingsEffects();
 		
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
@@ -165,6 +182,12 @@ export default class AgentLinkPlugin extends Plugin {
 		if (settingsChanged) {
 			await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
 		}
+
+		if (this.settingsStore) {
+			this.settingsStore.replace(this.settings);
+		} else {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
+		}
 	}
 
 	/**
@@ -214,21 +237,40 @@ export default class AgentLinkPlugin extends Plugin {
 	}
 
 	async saveSettings(options?: { rebuildAdapter?: boolean }): Promise<void> {
-		const rebuildAdapter = options?.rebuildAdapter ?? true;
-		logger.setDebug(this.settings.enableDebugLog);
-		await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
-		await this.sessionManager.setHistoryExpiryDays(this.settings.sessionHistoryExpiryDays);
-		if (rebuildAdapter) {
-			await this.buildAdapter();
+		if (!this.settingsStore) {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
 		}
-		// Refresh the open view
-		const view = this.getChatView();
-		if (view && this.adapter) {
-			if (rebuildAdapter) {
-				view.setAdapter(this.adapter);
-			}
-			view.refreshSettings();
+		if (!this.settingsEffects) {
+			this.settingsEffects = this.createSettingsEffects();
 		}
+		this.settingsStore.replace(this.settings);
+		this.settings = this.settingsStore.getSnapshot();
+		await this.applySettingsEffects(
+			createSettingsEffectFlags({
+				rebuildAdapter: options?.rebuildAdapter ?? true,
+			}),
+		);
+	}
+
+	async applySettingsPatch(
+		patch: SettingsPatch,
+		options?: ApplySettingsPatchOptions,
+	): Promise<void> {
+		if (!this.settingsStore) {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
+		}
+		if (!this.settingsEffects) {
+			this.settingsEffects = this.createSettingsEffects();
+		}
+		const next = this.settingsStore.applyPatch(patch);
+		this.settings = next;
+		const flags = createSettingsEffectFlags({
+			persist: options?.persist,
+			rebuildAdapter: options?.rebuildAdapter,
+			refreshView: options?.refreshView,
+			updateHistoryExpiry: options?.updateHistoryExpiry,
+		});
+		await this.applySettingsEffects(flags);
 	}
 
 	// ── Backend Management ─────────────────────────────────────────────
@@ -305,6 +347,34 @@ export default class AgentLinkPlugin extends Plugin {
 		const ttlMs = Math.max(0, this.settings.acpConnectionCacheTtlMinutes) * 60_000;
 		const validBackendIds = new Set(this.settings.backends.map((backend) => backend.id));
 		await this.adapterPool.evictExpired(ttlMs, this.settings.activeBackendId || null, validBackendIds);
+	}
+
+	private createSettingsEffects(): SettingsEffects {
+		return new PluginSettingsEffects({
+			persist: async (settings) => {
+				await saveStoredSettings(this, settings as unknown as Record<string, unknown>);
+			},
+			rebuildAdapter: async () => {
+				await this.buildAdapter();
+			},
+			refreshView: async ({ rebuildAdapter }) => {
+				const view = this.getChatView();
+				if (view && this.adapter) {
+					if (rebuildAdapter) {
+						view.setAdapter(this.adapter);
+					}
+					view.refreshSettings();
+				}
+			},
+			setDebug: (enabled) => logger.setDebug(enabled),
+			updateHistoryExpiry: async (days) => {
+				await this.sessionManager.setHistoryExpiryDays(days);
+			},
+		});
+	}
+
+	private async applySettingsEffects(flags: SettingsEffectFlags): Promise<void> {
+		await this.settingsEffects.apply(this.settings, flags);
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

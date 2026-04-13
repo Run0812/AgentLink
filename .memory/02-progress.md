@@ -9,6 +9,32 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I1：SettingsStore / SettingsEffects 分层骨架
+
+**实现范围**:
+- settings 领域基础分层
+- settings-tab 与 plugin 保存链路解耦（骨架阶段）
+
+**完成内容**:
+- 新增 `settings-store`：`SettingsPatch`、`SettingsStore`、`InMemorySettingsStore`
+- 新增 `settings-effects`：`SettingsEffects`、`SettingsEffectFlags`、`PluginSettingsEffects`
+- `main.ts` 接入 settings store/effects，并新增 `applySettingsPatch(patch, options)` 入口
+- `settings-tab` 的保存入口改为 `applyCurrentSettings()`，由 patch 流程统一进入 plugin 侧
+- 在 `01-tasks.md` 增加“架构模块化 v1”清单，并标记 I1 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts` 通过（8 tests）
+
+**相关文件**:
+- `src/settings/settings-store.ts`
+- `src/settings/settings-effects.ts`
+- `src/main.ts`
+- `src/settings/settings-tab.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 设置页改为四分 Tab（Agent / Agent advanced / History / ACP subscription）
 
 **实现范围**:
