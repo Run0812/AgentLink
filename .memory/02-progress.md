@@ -9,6 +9,28 @@
 
 ---
 
+## 2026-04-13 - 移除外部 AI Review 工作流脚本并同步 CI 文档
+
+**实现范围**:
+- GitHub Actions PR workflow 简化
+- 外部 AI review 脚本移除
+- 贡献文档与当前 CI 对齐
+
+**完成内容**:
+- `pr-ci.yml` 已移除第三方模型调用链路，仅保留 `npm ci -> lint -> test -> build:quick -> artifact` 的 CI 门禁
+- 删除不再使用的 `.github/scripts/ai-review.mjs`
+- 更新 `CONTRIBUTING.md` 的 CI 说明，移除 Claude review 叙述，改为可选的 GitHub Copilot code review 说明（非阻断）
+
+**测试结果**:
+- 本次仅包含 workflow / 文档与脚本清理，未运行构建与测试命令
+
+**相关文件**:
+- `.github/workflows/pr-ci.yml`
+- `.github/scripts/ai-review.mjs`
+- `CONTRIBUTING.md`
+
+---
+
 ## 2026-04-11 - 修复 inline token 仅能插入行首与样式过重
 
 **实现范围**:
@@ -1519,4 +1541,4 @@ build/
 
 ---
 
-*最后更新: 2026-04-10*
+*最后更新: 2026-04-13*

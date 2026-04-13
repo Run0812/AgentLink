@@ -23,7 +23,7 @@ npm install
 | `npm run dev` | Start esbuild watch mode (outputs to project root) |
 | `npm run lint` | TypeScript typecheck (no-emit) |
 | `npm run test` | Run Vitest unit tests |
-| `npm run build:quick` | Production build → `build/` |
+| `npm run build:quick` | Production build to `build/` |
 | `npm run build` | Lint + test + production build |
 
 ### Installing in Obsidian (dev)
@@ -32,9 +32,9 @@ Copy the output files into your vault's plugin directory:
 
 ```
 <vault>/.obsidian/plugins/agentlink/
-├── main.js
-├── manifest.json
-└── styles.css
+- main.js
+- manifest.json
+- styles.css
 ```
 
 Or use the provided `sync-dev.ps1` script on Windows.
@@ -44,8 +44,8 @@ Or use the provided `sync-dev.ps1` script on Windows.
 ## Branching strategy
 
 ```
-main          ← protected, production-only
-  └── your-feature-branch   (PR → main)
+main          (protected, production-only)
+  - your-feature-branch   (PR -> main)
 ```
 
 - Branch off from `main`.
@@ -74,12 +74,12 @@ Before opening a PR that bumps the version, ensure **all three files are updated
 
 Every PR against `main` runs:
 
-1. **Typecheck / Lint** – `npm run lint`
-2. **Tests** – `npm run test`
-3. **Build** – `npm run build:quick`
-4. **AI Code Review** – Claude reviews the diff and posts a comment.
-   - Blocks only on: severe bugs, build failures, version inconsistencies, Obsidian guideline violations.
-   - Style and refactoring suggestions are advisory only.
+1. **Typecheck / Lint** - `npm run lint`
+2. **Tests** - `npm run test`
+3. **Build** - `npm run build:quick`
+
+Optional:
+- **GitHub Copilot code review** can be enabled at repository ruleset level, and its comments are advisory (non-blocking).
 
 All checks must be green before a PR can be merged.
 
@@ -105,13 +105,13 @@ See [RELEASE.md](RELEASE.md) for the full release process.
 
 ## Branch protection (recommended settings)
 
-Ask the repo owner to enable the following in **Settings → Branches → Add rule for `main`**:
+Ask the repo owner to enable the following in **Settings -> Branches -> Add rule for `main`**:
 
-- ✅ Require a pull request before merging
-- ✅ Require status checks to pass before merging
-  - Required checks: `Install / Lint / Test / Build`
-- ✅ Require branches to be up to date before merging
-- ✅ Do not allow bypassing the above settings
+- Require a pull request before merging
+- Require status checks to pass before merging
+- Required checks: `Install / Lint / Test / Build`
+- Require branches to be up to date before merging
+- Do not allow bypassing the above settings
 
 ---
 
