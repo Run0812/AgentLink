@@ -9,6 +9,36 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I6：UI 工程化收口（重复 inline style 迁移）
+
+**实现范围**:
+- 不引入额外 UI 库
+- 抽取重复内联样式到 `styles.css`，保持交互语义不变
+
+**完成内容**:
+- `chat-view` 的以下重复样式迁移为 class：
+  - toolbar selector/button 样式
+  - header action button 样式
+  - toolbar dropdown/header/item 样式
+  - 单行省略文本样式
+  - 紧凑 send/stop 按钮样式
+  - 文件选择列表项 hover 样式
+- `chat-view` 的样式应用改为 `addClass + 少量动态变量/尺寸`
+- 保持原有交互逻辑与布局行为不变
+- `01-tasks.md` 标记 I6 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+- `npm test -- test/unit/acp-bridge-adapter.test.ts` 通过（22 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `styles.css`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I5：ACP Adapter 内部拆分（transport / mapper / session-state）
 
 **实现范围**:

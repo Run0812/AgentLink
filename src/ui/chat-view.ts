@@ -679,26 +679,11 @@ export class ChatView extends ItemView {
 		sendBtnContainer.style.marginLeft = 'auto';
 		
 		this.sendBtn = sendBtnContainer.createEl('button', { text: 'Send' });
-		this.sendBtn.style.padding = '0.25rem 1rem';
-		this.sendBtn.style.height = '24px';
-		this.sendBtn.style.background = 'var(--interactive-accent)';
-		this.sendBtn.style.color = 'var(--text-on-accent)';
-		this.sendBtn.style.border = 'none';
-		this.sendBtn.style.borderRadius = '4px';
-		this.sendBtn.style.cursor = 'pointer';
-		this.sendBtn.style.fontSize = '0.75rem';
-		this.sendBtn.style.fontWeight = '500';
+		this.sendBtn.addClass('agentlink-compact-send-btn');
 		this.sendBtn.addEventListener('click', () => this.handleSend());
 
 		this.stopBtn = sendBtnContainer.createEl('button', { text: 'Stop' });
-		this.stopBtn.style.padding = '0.25rem 1rem';
-		this.stopBtn.style.height = '24px';
-		this.stopBtn.style.background = 'var(--background-modifier-error)';
-		this.stopBtn.style.color = 'var(--text-on-accent)';
-		this.stopBtn.style.border = 'none';
-		this.stopBtn.style.borderRadius = '4px';
-		this.stopBtn.style.cursor = 'pointer';
-		this.stopBtn.style.fontSize = '0.75rem';
+		this.stopBtn.addClass('agentlink-compact-stop-btn');
 		this.stopBtn.style.display = 'none';
 		this.stopBtn.addEventListener('click', () => this.handleStop());
 
@@ -731,39 +716,14 @@ export class ChatView extends ItemView {
 	}
 
 	private applyToolbarSelectorButtonStyle(button: HTMLButtonElement, color: string): void {
-		button.style.display = 'flex';
-		button.style.alignItems = 'center';
-		button.style.justifyContent = 'space-between';
-		button.style.gap = '0.25rem';
+		button.addClass('agentlink-toolbar-selector-btn');
 		button.style.minWidth = ChatView.TOOLBAR_BUTTON_MIN_WIDTH;
 		button.style.maxWidth = ChatView.TOOLBAR_BUTTON_MAX_WIDTH;
-		button.style.height = '24px';
-		button.style.padding = '0.25rem 0.45rem';
-		button.style.boxSizing = 'border-box';
-		button.style.background = 'transparent';
-		button.style.border = '1px solid var(--background-modifier-border)';
-		button.style.borderRadius = '4px';
-		button.style.cursor = 'pointer';
-		button.style.fontSize = '0.75rem';
-		button.style.color = color;
-		button.style.whiteSpace = 'nowrap';
-		button.style.overflow = 'hidden';
-		button.style.flexShrink = '0';
+		button.style.setProperty('--agentlink-toolbar-selector-color', color);
 	}
 
 	private applyHeaderActionButtonStyle(button: HTMLButtonElement, ariaLabel: string): void {
-		button.style.width = '28px';
-		button.style.height = '28px';
-		button.style.padding = '0';
-		button.style.display = 'inline-flex';
-		button.style.alignItems = 'center';
-		button.style.justifyContent = 'center';
-		button.style.background = 'transparent';
-		button.style.border = '1px solid var(--background-modifier-border)';
-		button.style.borderRadius = '6px';
-		button.style.cursor = 'pointer';
-		button.style.opacity = '0.7';
-		button.style.color = 'var(--text-muted)';
+		button.addClass('agentlink-header-action-btn');
 		button.setAttribute('aria-label', ariaLabel);
 		button.setAttribute('data-tooltip-position', 'bottom');
 	}
@@ -808,22 +768,11 @@ export class ChatView extends ItemView {
 		alignment: 'left' | 'right' = 'left',
 		maxHeight?: string,
 	): void {
-		container.style.display = 'block';
-		container.style.position = 'absolute';
-		container.style.bottom = '100%';
-		container.style.left = alignment === 'left' ? '0' : 'auto';
-		container.style.right = alignment === 'right' ? '0' : 'auto';
-		container.style.zIndex = '1000';
+		container.addClass('agentlink-toolbar-dropdown');
+		container.toggleClass('is-align-left', alignment === 'left');
+		container.toggleClass('is-align-right', alignment === 'right');
 		container.style.minWidth = ChatView.TOOLBAR_DROPDOWN_MIN_WIDTH;
 		container.style.maxWidth = ChatView.TOOLBAR_DROPDOWN_MAX_WIDTH;
-		container.style.boxSizing = 'border-box';
-		container.style.padding = '0.3rem';
-		container.style.background = 'var(--background-primary)';
-		container.style.border = '1px solid var(--background-modifier-border)';
-		container.style.borderRadius = '6px';
-		container.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.15)';
-		container.style.marginBottom = '0.3rem';
-		container.style.overflowX = 'hidden';
 		if (maxHeight) {
 			container.style.maxHeight = maxHeight;
 			container.style.overflowY = 'auto';
@@ -834,31 +783,20 @@ export class ChatView extends ItemView {
 	}
 
 	private applyToolbarDropdownHeaderStyle(header: HTMLElement): void {
-		header.style.fontSize = '0.7rem';
-		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.25rem 0.4rem';
-		header.style.marginBottom = '0.2rem';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
-		header.style.whiteSpace = 'nowrap';
-		header.style.overflow = 'hidden';
-		header.style.textOverflow = 'ellipsis';
+		header.addClass('agentlink-toolbar-dropdown-header');
 	}
 
 	private applyToolbarDropdownItemStyle(item: HTMLButtonElement): void {
-		item.style.width = '100%';
-		item.style.boxSizing = 'border-box';
-		item.style.overflow = 'hidden';
+		item.addClass('agentlink-toolbar-dropdown-item');
 	}
 
 	private applySingleLineEllipsis(element: HTMLElement, fontSize: string, color?: string): void {
-		element.style.minWidth = '0';
-		element.style.fontSize = fontSize;
-		element.style.lineHeight = '1.3';
-		element.style.overflow = 'hidden';
-		element.style.textOverflow = 'ellipsis';
-		element.style.whiteSpace = 'nowrap';
+		element.addClass('agentlink-single-line-ellipsis');
+		element.style.setProperty('--agentlink-ellipsis-font-size', fontSize);
 		if (color) {
-			element.style.color = color;
+			element.style.setProperty('--agentlink-ellipsis-color', color);
+		} else {
+			element.style.removeProperty('--agentlink-ellipsis-color');
 		}
 	}
 
@@ -2094,22 +2032,16 @@ export class ChatView extends ItemView {
 						text: file,
 						cls: 'agentlink-file-item',
 					});
-					item.style.width = '100%';
-					item.style.textAlign = 'left';
-					item.style.padding = '0.25rem 0.4rem';
-					item.style.border = 'none';
-					item.style.background = 'transparent';
-					item.style.cursor = 'pointer';
-					item.style.fontSize = '0.8rem';
+					item.addClass('agentlink-file-picker-item');
 					item.addEventListener('click', () => {
 						modal.close();
 						resolve(file);
 					});
 					item.addEventListener('mouseenter', () => {
-						item.style.background = 'var(--background-modifier-hover)';
+						item.addClass('is-hover');
 					});
 					item.addEventListener('mouseleave', () => {
-						item.style.background = 'transparent';
+						item.removeClass('is-hover');
 					});
 				}
 			};
