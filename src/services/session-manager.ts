@@ -151,6 +151,33 @@ export class SessionManager {
 		return deleted;
 	}
 
+	/** Delete multiple sessions in one operation. */
+	async deleteSessions(
+		sessionIds: string[],
+		options?: { allowCurrent?: boolean }
+	): Promise<{ deleted: number; skippedCurrent: number }> {
+		const allowCurrent = options?.allowCurrent ?? false;
+		const uniqueIds = new Set(sessionIds);
+		let deleted = 0;
+		let skippedCurrent = 0;
+
+		for (const sessionId of uniqueIds) {
+			if (!allowCurrent && sessionId === this.currentSessionId) {
+				skippedCurrent++;
+				continue;
+			}
+			if (this.sessions.delete(sessionId)) {
+				deleted++;
+			}
+		}
+
+		if (deleted > 0) {
+			await this.persist();
+		}
+
+		return { deleted, skippedCurrent };
+	}
+
 	/** Get all session metadata (for list view) */
 	getAllSessions(): SessionMetadata[] {
 		const removedExpired = this.pruneExpiredSessionsSync();
@@ -170,11 +197,27 @@ export class SessionManager {
 			.sort((a, b) => b.updatedAt - a.updatedAt); // Most recent first
 	}
 
-	/** Clear all sessions */
-	async clearAllSessions(): Promise<void> {
+	/** Clear all sessions, optionally preserving the current one. */
+	async clearAllSessions(options?: { keepCurrent?: boolean }): Promise<number> {
+		const keepCurrent = options?.keepCurrent ?? false;
+		const preservedSessionId = keepCurrent ? this.currentSessionId : null;
+
+		if (preservedSessionId && this.sessions.has(preservedSessionId)) {
+			const removed = Math.max(0, this.sessions.size - 1);
+			const preserved = this.sessions.get(preservedSessionId);
+			this.sessions.clear();
+			if (preserved) {
+				this.sessions.set(preservedSessionId, preserved);
+			}
+			await this.persist();
+			return removed;
+		}
+
+		const removed = this.sessions.size;
 		this.sessions.clear();
 		this.currentSessionId = null;
 		await this.persist();
+		return removed;
 	}
 
 	/** Generate a title from the first user message */
@@ -204,6 +247,10 @@ export class SessionManager {
 			await this.persist();
 			console.log(`[SessionManager] Cleaned up ${toDelete.length} old sessions${removedExpired > 0 ? ` (${removedExpired} expired)` : ''}`);
 		}
+	}
+
+	async removeExpiredSessions(): Promise<number> {
+		return await this.pruneExpiredSessions();
 	}
 
 	private async pruneExpiredSessions(now = Date.now()): Promise<number> {

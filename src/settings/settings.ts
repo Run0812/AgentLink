@@ -8,6 +8,8 @@ import { App } from 'obsidian';
 import { AgentBackendConfig, BackendType } from '../core/types';
 import { fetchAcpRegistry, loadLocalAcpRegistry, registryAgentToBackendConfig, saveLocalAcpRegistry, AcpRegistryResponse } from './registry-utils';
 
+export type TerminalShellOption = 'auto' | 'pwsh' | 'powershell' | 'cmd' | 'bash' | 'zsh' | 'sh' | 'custom';
+
 export interface AgentLinkSettings {
   /** Currently selected backend config ID */
   activeBackendId: string;
@@ -49,6 +51,10 @@ export interface AgentLinkSettings {
   acpConnectionCacheTtlMinutes: number;
   /** Session history expiry in days. 0 disables expiration. */
   sessionHistoryExpiryDays: number;
+  /** Terminal shell selection used by the terminal tool. */
+  terminalShell: TerminalShellOption;
+  /** Custom shell executable/path when terminalShell = custom. */
+  terminalShellCustomPath: string;
 }
 
 /** Create preset Kimi Code backend config */
@@ -100,6 +106,8 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
   thinkingMode: 'balanced',
   acpConnectionCacheTtlMinutes: 10,
   sessionHistoryExpiryDays: 30,
+  terminalShell: 'auto',
+  terminalShellCustomPath: '',
 };
 
 /**

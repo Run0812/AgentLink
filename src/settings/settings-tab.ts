@@ -1,7 +1,7 @@
-import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice, ToggleComponent } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
-import { getBackendTypeLabel, isValidBackendId, generateBackendId, createAcpBridgeBackendConfig, mergeAcpRegistryIntoSettings } from './settings';
+import { getBackendTypeLabel, generateBackendId, createAcpBridgeBackendConfig, mergeAcpRegistryIntoSettings, TerminalShellOption } from './settings';
 import { fetchAcpRegistry } from './registry-utils';
 import { AcpAgentEditorModal } from './acp-agent-editor';
 import { LocalAgentScanModal } from './local-agent-scanner';
@@ -10,6 +10,11 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
 	private editingBackendId: string | null = null;
 	private delayedSaveHandle: ReturnType<typeof setTimeout> | null = null;
+	private activeTab: 'general' | 'history' = 'general';
+	private selectedHistorySessionIds = new Set<string>();
+	private pendingSingleDeleteSessionId: string | null = null;
+	private pendingBulkDelete = false;
+	private pendingClearHistory = false;
 
 	constructor(app: App, plugin: AgentLinkPlugin) {
 		super(app, plugin);
@@ -34,25 +39,76 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		}, delayMs);
 	}
 
+	private scheduleNoRebuildSave(delayMs = 250): void {
+		this.scheduleSettingsSave({ rebuildAdapter: false }, delayMs);
+	}
+
+	private parsePositiveInteger(value: string): number | null {
+		const parsed = Number.parseInt(value, 10);
+		if (Number.isNaN(parsed) || parsed < 0) {
+			return null;
+		}
+		return parsed;
+	}
+
+	private createSettingsTabButton(container: HTMLElement, label: string, tab: 'general' | 'history'): HTMLButtonElement {
+		const button = container.createEl('button', { text: label });
+		const isActive = this.activeTab === tab;
+		button.style.border = '1px solid var(--background-modifier-border)';
+		button.style.background = isActive ? 'var(--interactive-accent)' : 'var(--background-secondary)';
+		button.style.color = isActive ? 'var(--text-on-accent)' : 'var(--text-normal)';
+		button.style.borderRadius = '6px';
+		button.style.padding = '0.3em 0.8em';
+		button.style.cursor = 'pointer';
+		button.style.fontSize = '0.85em';
+		button.style.fontWeight = isActive ? '600' : '500';
+		button.addEventListener('click', () => {
+			if (this.activeTab === tab) {
+				return;
+			}
+			this.activeTab = tab;
+			this.pendingBulkDelete = false;
+			this.pendingClearHistory = false;
+			this.pendingSingleDeleteSessionId = null;
+			this.display();
+		});
+		return button;
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl('h2', { text: 'AgentLink Settings' });
 
+		const tabBar = containerEl.createDiv();
+		tabBar.style.display = 'flex';
+		tabBar.style.gap = '0.5em';
+		tabBar.style.marginBottom = '1em';
+		tabBar.style.paddingBottom = '0.75em';
+		tabBar.style.borderBottom = '1px solid var(--background-modifier-border)';
+		this.createSettingsTabButton(tabBar, 'General', 'general');
+		this.createSettingsTabButton(tabBar, 'Conversation history', 'history');
+
+		const contentEl = containerEl.createDiv();
+		if (this.activeTab === 'history') {
+			this.renderConversationHistoryTab(contentEl);
+			return;
+		}
+
 		// Backend Management Section
-		this.renderBackendManagement(containerEl);
+		this.renderBackendManagement(contentEl);
 
 		// ACP Registry Settings Section
-		containerEl.createEl('h3', { text: 'ACP Registry' });
-		this.renderRegistrySettings(containerEl);
+		contentEl.createEl('h3', { text: 'ACP Registry' });
+		this.renderRegistrySettings(contentEl);
 
 		// Global Settings Section
-		containerEl.createEl('h3', { text: 'Global Settings' });
-		this.renderGlobalSettings(containerEl);
+		contentEl.createEl('h3', { text: 'Global Settings' });
+		this.renderGlobalSettings(contentEl);
 
 		// Tool Call Settings Section
-		containerEl.createEl('h3', { text: 'Tool Call Settings' });
-		this.renderToolCallSettings(containerEl);
+		contentEl.createEl('h3', { text: 'Tool Call Settings' });
+		this.renderToolCallSettings(contentEl);
 	}
 
 	// ── Backend Management ───────────────────────────────────────────────
@@ -451,15 +507,19 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('Request Timeout (ms)')
 			.setDesc('Default timeout for all backends. 0 = no timeout.')
-			.addText((t) =>
-				t.setValue(String(this.plugin.settings.requestTimeoutMs)).onChange(async (v) => {
-					const n = parseInt(v, 10);
-					if (!isNaN(n) && n >= 0) {
-						this.plugin.settings.requestTimeoutMs = n;
-						await this.saveSettingsNoRebuild();
+			.addText((text) => {
+				text.setValue(String(this.plugin.settings.requestTimeoutMs));
+				text.inputEl.type = 'number';
+				text.inputEl.min = '0';
+				text.onChange((value) => {
+					const parsed = this.parsePositiveInteger(value);
+					if (parsed === null) {
+						return;
 					}
-				})
-			);
+					this.plugin.settings.requestTimeoutMs = parsed;
+					this.scheduleNoRebuildSave();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName('System Prompt')
@@ -498,33 +558,58 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName('ACP connection cache TTL (minutes)')
 			.setDesc('Keep inactive ACP agents connected for this many minutes after switching. Set to 0 to disable caching.')
-			.addText((t) =>
-				t.setValue(String(this.plugin.settings.acpConnectionCacheTtlMinutes)).onChange(async (v) => {
-					const n = parseInt(v, 10);
-					if (!isNaN(n) && n >= 0) {
-						this.plugin.settings.acpConnectionCacheTtlMinutes = n;
-						await this.saveSettingsNoRebuild();
+			.addText((text) => {
+				text.setValue(String(this.plugin.settings.acpConnectionCacheTtlMinutes));
+				text.inputEl.type = 'number';
+				text.inputEl.min = '0';
+				text.onChange((value) => {
+					const parsed = this.parsePositiveInteger(value);
+					if (parsed === null) {
+						return;
 					}
-				})
-			);
-
-		new Setting(containerEl)
-			.setName('Session history expiry (days)')
-			.setDesc('Automatically remove chat history older than this many days. Set to 0 to disable expiration.')
-			.addText((t) =>
-				t.setValue(String(this.plugin.settings.sessionHistoryExpiryDays)).onChange(async (v) => {
-					const n = parseInt(v, 10);
-					if (!isNaN(n) && n >= 0) {
-						this.plugin.settings.sessionHistoryExpiryDays = n;
-						await this.saveSettingsNoRebuild();
-					}
-				})
-			);
+					this.plugin.settings.acpConnectionCacheTtlMinutes = parsed;
+					this.scheduleNoRebuildSave();
+				});
+			});
 	}
 
 	// ── Tool Call Settings ───────────────────────────────────────────────
 
 	private renderToolCallSettings(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName('Terminal shell')
+			.setDesc('Shell used by terminal tool calls. Auto will choose a sensible default for your platform.')
+			.addDropdown((dropdown) => {
+				dropdown.addOption('auto', 'Auto (recommended)');
+				dropdown.addOption('pwsh', 'PowerShell 7 (pwsh)');
+				dropdown.addOption('powershell', 'Windows PowerShell');
+				dropdown.addOption('cmd', 'Command Prompt (cmd)');
+				dropdown.addOption('bash', 'Bash');
+				dropdown.addOption('zsh', 'Zsh');
+				dropdown.addOption('sh', 'POSIX sh');
+				dropdown.addOption('custom', 'Custom executable/path');
+				dropdown.setValue(this.plugin.settings.terminalShell);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.terminalShell = value as TerminalShellOption;
+					await this.saveSettingsNoRebuild();
+					this.display();
+				});
+			});
+
+		if (this.plugin.settings.terminalShell === 'custom') {
+			new Setting(containerEl)
+				.setName('Custom terminal shell path')
+				.setDesc('Absolute path or executable name to run the terminal tool.')
+				.addText((text) => {
+					text.setPlaceholder(process.platform === 'win32' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : '/bin/bash');
+					text.setValue(this.plugin.settings.terminalShellCustomPath);
+					text.onChange((value) => {
+						this.plugin.settings.terminalShellCustomPath = value;
+						this.scheduleNoRebuildSave();
+					});
+				});
+		}
+
 		new Setting(containerEl)
 			.setName('Auto-confirm Read Operations')
 			.setDesc('Automatically confirm read-only operations (read_file, list_dir, search).')
@@ -554,6 +639,230 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					await this.saveSettingsNoRebuild();
 				})
 			);
+	}
+
+	private renderConversationHistoryTab(containerEl: HTMLElement): void {
+		containerEl.createEl('h3', { text: 'Conversation history' });
+
+		new Setting(containerEl)
+			.setName('Session history expiry (days)')
+			.setDesc('Automatically remove chat history older than this many days. Set to 0 to disable expiration.')
+			.addText((text) => {
+				text.setPlaceholder('30');
+				text.setValue(String(this.plugin.settings.sessionHistoryExpiryDays));
+				text.inputEl.type = 'number';
+				text.inputEl.min = '0';
+				text.onChange((value) => {
+					const parsed = this.parsePositiveInteger(value);
+					if (parsed === null) {
+						return;
+					}
+					this.plugin.settings.sessionHistoryExpiryDays = parsed;
+					this.scheduleNoRebuildSave();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Remove expired sessions now')
+			.setDesc('Run expiration cleanup immediately with the current expiry rule.')
+			.addButton((button) => {
+				button.setButtonText('Run cleanup');
+				button.onClick(async () => {
+					const removed = await this.plugin.sessionManager.removeExpiredSessions();
+					new Notice(removed > 0 ? `Removed ${removed} expired sessions.` : 'No expired sessions found.');
+					this.selectedHistorySessionIds.clear();
+					this.pendingSingleDeleteSessionId = null;
+					this.pendingBulkDelete = false;
+					this.pendingClearHistory = false;
+					this.display();
+				});
+			});
+
+		const sessions = this.plugin.sessionManager.getAllSessions();
+		const currentSessionId = this.plugin.sessionManager.getCurrentSessionId();
+		const validSessionIds = new Set(sessions.map((session) => session.id));
+		for (const selectedId of [...this.selectedHistorySessionIds]) {
+			if (!validSessionIds.has(selectedId)) {
+				this.selectedHistorySessionIds.delete(selectedId);
+			}
+		}
+
+		const selectableSessions = sessions.filter((session) => session.id !== currentSessionId);
+		const allSelected = selectableSessions.length > 0
+			&& selectableSessions.every((session) => this.selectedHistorySessionIds.has(session.id));
+		const selectedCount = this.selectedHistorySessionIds.size;
+
+		const actionsRow = containerEl.createDiv();
+		actionsRow.style.display = 'flex';
+		actionsRow.style.flexWrap = 'wrap';
+		actionsRow.style.gap = '0.5em';
+		actionsRow.style.marginTop = '0.8em';
+		actionsRow.style.marginBottom = '0.8em';
+
+		new ButtonComponent(actionsRow)
+			.setButtonText(allSelected ? 'Unselect all' : 'Select all')
+			.setDisabled(selectableSessions.length === 0)
+			.onClick(() => {
+				if (allSelected) {
+					this.selectedHistorySessionIds.clear();
+				} else {
+					for (const session of selectableSessions) {
+						this.selectedHistorySessionIds.add(session.id);
+					}
+				}
+				this.pendingBulkDelete = false;
+				this.display();
+			});
+
+		new ButtonComponent(actionsRow)
+			.setButtonText(this.pendingBulkDelete ? `Click again to delete (${selectedCount})` : `Delete selected (${selectedCount})`)
+			.setWarning()
+			.setDisabled(selectedCount === 0)
+			.onClick(async () => {
+				if (selectedCount === 0) {
+					return;
+				}
+				if (!this.pendingBulkDelete) {
+					this.pendingBulkDelete = true;
+					this.pendingClearHistory = false;
+					this.pendingSingleDeleteSessionId = null;
+					this.display();
+					return;
+				}
+				const result = await this.plugin.sessionManager.deleteSessions([...this.selectedHistorySessionIds]);
+				this.selectedHistorySessionIds.clear();
+				this.pendingBulkDelete = false;
+				this.pendingSingleDeleteSessionId = null;
+				this.display();
+				const skippedMsg = result.skippedCurrent > 0 ? ` (${result.skippedCurrent} current session skipped)` : '';
+				new Notice(`Deleted ${result.deleted} sessions${skippedMsg}.`);
+			});
+
+		new ButtonComponent(actionsRow)
+			.setButtonText(this.pendingClearHistory ? 'Click again to clear history' : 'Clear all history')
+			.setWarning()
+			.setDisabled(sessions.length === 0)
+			.onClick(async () => {
+				if (!this.pendingClearHistory) {
+					this.pendingClearHistory = true;
+					this.pendingBulkDelete = false;
+					this.pendingSingleDeleteSessionId = null;
+					this.display();
+					return;
+				}
+				const removed = await this.plugin.sessionManager.clearAllSessions({ keepCurrent: true });
+				this.selectedHistorySessionIds.clear();
+				this.pendingClearHistory = false;
+				this.pendingBulkDelete = false;
+				this.pendingSingleDeleteSessionId = null;
+				this.display();
+				new Notice(removed > 0 ? `Cleared ${removed} saved sessions.` : 'No saved sessions to clear.');
+			});
+
+		const helper = containerEl.createEl('div', {
+			text: 'Current session is preserved to avoid interrupting an active chat.',
+			cls: 'setting-item-description',
+		});
+		helper.style.marginBottom = '0.5em';
+
+		if (sessions.length === 0) {
+			containerEl.createEl('p', { text: 'No conversation history yet.', cls: 'setting-item-description' });
+			return;
+		}
+
+		const list = containerEl.createDiv();
+		list.style.display = 'flex';
+		list.style.flexDirection = 'column';
+		list.style.gap = '0.5em';
+
+		for (const session of sessions) {
+			const row = list.createDiv();
+			row.style.display = 'grid';
+			row.style.gridTemplateColumns = 'auto 1fr auto';
+			row.style.gap = '0.6em';
+			row.style.alignItems = 'start';
+			row.style.padding = '0.55em 0.65em';
+			row.style.border = '1px solid var(--background-modifier-border)';
+			row.style.borderRadius = '8px';
+			row.style.background = 'var(--background-secondary)';
+
+			const isCurrent = session.id === currentSessionId;
+
+			const checkbox = row.createEl('input');
+			checkbox.type = 'checkbox';
+			checkbox.style.marginTop = '0.25em';
+			checkbox.checked = this.selectedHistorySessionIds.has(session.id);
+			checkbox.disabled = isCurrent;
+			checkbox.addEventListener('change', () => {
+				if (checkbox.checked) {
+					this.selectedHistorySessionIds.add(session.id);
+				} else {
+					this.selectedHistorySessionIds.delete(session.id);
+				}
+				this.pendingBulkDelete = false;
+				this.display();
+			});
+
+			const info = row.createDiv();
+			const title = info.createEl('div', { text: session.title });
+			title.style.fontWeight = '600';
+			title.style.marginBottom = '0.15em';
+			const updated = new Date(session.updatedAt).toLocaleString();
+			info.createEl('div', {
+				text: `${updated} · ${session.messageCount} messages${isCurrent ? ' · current session' : ''}`,
+				cls: 'setting-item-description',
+			});
+
+			const preview = this.buildSessionPreview(session.id);
+			if (preview) {
+				const previewEl = info.createEl('div', { text: preview, cls: 'setting-item-description' });
+				previewEl.style.marginTop = '0.25em';
+				previewEl.style.lineHeight = '1.4';
+			}
+
+			const rowActions = row.createDiv();
+			rowActions.style.display = 'flex';
+			rowActions.style.gap = '0.4em';
+
+			new ButtonComponent(rowActions)
+				.setButtonText(
+					this.pendingSingleDeleteSessionId === session.id
+						? 'Confirm delete'
+						: 'Delete'
+				)
+				.setWarning()
+				.setDisabled(isCurrent)
+				.onClick(async () => {
+					if (isCurrent) {
+						return;
+					}
+					if (this.pendingSingleDeleteSessionId !== session.id) {
+						this.pendingSingleDeleteSessionId = session.id;
+						this.pendingBulkDelete = false;
+						this.pendingClearHistory = false;
+						this.display();
+						return;
+					}
+					this.pendingSingleDeleteSessionId = null;
+					this.selectedHistorySessionIds.delete(session.id);
+					await this.plugin.sessionManager.deleteSession(session.id);
+					this.display();
+					new Notice('Session deleted.');
+				});
+		}
+	}
+
+	private buildSessionPreview(sessionId: string): string {
+		const session = this.plugin.sessionManager.getSession(sessionId);
+		if (!session || session.messages.length === 0) {
+			return '';
+		}
+		const firstUserMessage = session.messages.find((message) => message.role === 'user') ?? session.messages[0];
+		const content = firstUserMessage.content.replace(/\s+/g, ' ').trim();
+		if (!content) {
+			return '';
+		}
+		return content.length > 120 ? `${content.slice(0, 117)}...` : content;
 	}
 
 	// ── Modal for Adding Backends ────────────────────────────────────────

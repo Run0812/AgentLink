@@ -9,6 +9,39 @@
 
 ---
 
+## 2026-04-13 - 设置页新增“对话历史”Tab与terminal shell可配置
+
+**实现范围**:
+- 设置页结构优化（Tab 化）
+- 对话历史管理能力增强
+- terminal 工具 shell 选择策略增强
+
+**完成内容**:
+- `settings-tab` 新增顶部 Tab：`General` 与 `Conversation history`
+- 将“会话过期时间”迁移到 `Conversation history` 专属 Tab
+- 历史 Tab 新增会话列表浏览（标题、更新时间、消息数、首条内容预览）
+- 历史 Tab 新增批量操作：全选/反选、批量删除（原地二次确认）、清空历史（保留当前会话，原地二次确认）
+- 历史 Tab 新增“立即清理过期会话”按钮
+- `SessionManager` 新增 `deleteSessions`、`removeExpiredSessions`，并扩展 `clearAllSessions({ keepCurrent })`
+- terminal 工具新增可配置 shell：`auto / pwsh / powershell / cmd / bash / zsh / sh / custom`
+- terminal 执行新增自动候选回退逻辑（`ENOENT` 时尝试下一候选 shell）
+- 设置页文本数字输入改为防抖保存，避免输入时频繁触发保存流程
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/settings/settings-tab.ts`
+- `src/settings/settings.ts`
+- `src/services/session-manager.ts`
+- `src/services/tool-executor.ts`
+- `src/ui/chat-view.ts`
+- `test/unit/tool-executor.test.ts`
+
+---
+
 ## 2026-04-13 - 新增本地 dev 手动发布运行操作（Codex 可直接执行）
 
 **实现范围**:

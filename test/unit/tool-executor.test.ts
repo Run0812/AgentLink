@@ -19,6 +19,8 @@ describe('ToolExecutor', () => {
 		workspaceRoot: '/test',
 		autoConfirmRead: true,
 		autoConfirmEdit: false,
+		terminalShell: 'auto',
+		terminalShellCustomPath: '',
 	};
 
 	beforeEach(() => {

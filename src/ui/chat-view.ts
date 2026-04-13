@@ -122,6 +122,8 @@ export class ChatView extends ItemView {
 			workspaceRoot: '', // Will be updated when needed
 			autoConfirmRead: settings.autoConfirmRead,
 			autoConfirmEdit: settings.autoConfirmEdit,
+			terminalShell: settings.terminalShell,
+			terminalShellCustomPath: settings.terminalShellCustomPath,
 		};
 		this.toolExecutor = new ToolExecutor(this.app, toolConfig);
 		this.contextService = new ContextService(this.app.vault);
@@ -166,6 +168,8 @@ export class ChatView extends ItemView {
 		this.toolExecutor.updateConfig({
 			autoConfirmRead: this.settings.autoConfirmRead,
 			autoConfirmEdit: this.settings.autoConfirmEdit,
+			terminalShell: this.settings.terminalShell,
+			terminalShellCustomPath: this.settings.terminalShellCustomPath,
 		});
 	}
 
