@@ -9,6 +9,37 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I4：提取 Composer / Message Renderer 并补齐会话持久化触发点
+
+**实现范围**:
+- ChatView 消息渲染与输入编排进一步拆分
+- 会话持久化触发点补齐（发送完成/切换/关闭/兜底）
+
+**完成内容**:
+- 新增 `MessageListRenderer`，承接 welcome/message/tool/file/thinking 渲染与重绘
+- 新增 `ComposerController`，承接输入文本序列化、光标选择管理、inline token 插入/移除
+- `chat-view` 将消息渲染与 composer 核心方法改为委托，保留生命周期与流程编排
+- 移除 `chat-view` 中大段重复渲染与输入 DOM 操作细节，职责收敛为 orchestration
+- 新增 `persistCurrentSession(reason)` 并接入关键时机：
+  - `finishStreaming`（发送完成/中断后）
+  - `loadSession`（切换会话前）
+  - `createNewSession`（新建前）
+  - `onClose`（视图关闭兜底）
+  - `clearConversation`（清空后）
+- `01-tasks.md` 标记 I4 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/controllers/message-list-renderer.ts`
+- `src/ui/controllers/composer-controller.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I3：ChatView Header/Toolbar 控制器化
 
 **实现范围**:

@@ -79,7 +79,7 @@
 - [x] I1 Settings 分层骨架（SettingsStore / SettingsEffects）
 - [x] I2 Settings 保存链路收敛（applySettingsPatch + effect flags）
 - [x] I3 ChatView 控制器化（Header / Toolbar）
-- [ ] I4 ChatView 控制器化（Composer / Message Renderer + 会话持久化触发点）
+- [x] I4 ChatView 控制器化（Composer / Message Renderer + 会话持久化触发点）
 - [ ] I5 ACP Adapter 内部重组（Transport / Mapper / SessionState）
 - [ ] I6 UI 工程化收口（重复 inline style 迁移到 styles.css）
 - [ ] I7 文档收口（01/02/03 memory 更新 + 验收记录）
