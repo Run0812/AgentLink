@@ -77,7 +77,7 @@
 **目标**: 在不改变用户行为的前提下完成 settings/chat/acp 的模块化分层，并建立可回退的迭代提交链路。
 
 - [x] I1 Settings 分层骨架（SettingsStore / SettingsEffects）
-- [ ] I2 Settings 保存链路收敛（applySettingsPatch + effect flags）
+- [x] I2 Settings 保存链路收敛（applySettingsPatch + effect flags）
 - [ ] I3 ChatView 控制器化（Header / Toolbar）
 - [ ] I4 ChatView 控制器化（Composer / Message Renderer + 会话持久化触发点）
 - [ ] I5 ACP Adapter 内部重组（Transport / Mapper / SessionState）

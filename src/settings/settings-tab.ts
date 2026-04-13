@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, Modal, ButtonComponent, Notice } from 'obsidian';
 import AgentLinkPlugin from '../main';
 import { AgentBackendConfig, BackendType, AcpBridgeBackendConfig } from '../core/types';
-import { getBackendTypeLabel, generateBackendId, createAcpBridgeBackendConfig, mergeAcpRegistryIntoSettings, TerminalShellOption } from './settings';
+import { AgentLinkSettings, getBackendTypeLabel, generateBackendId, createAcpBridgeBackendConfig, mergeAcpRegistryIntoSettings, TerminalShellOption } from './settings';
 import { fetchAcpRegistry } from './registry-utils';
 import { AcpAgentEditorModal } from './acp-agent-editor';
 import { LocalAgentScanModal } from './local-agent-scanner';
@@ -16,6 +16,8 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 	private pendingSingleDeleteSessionId: string | null = null;
 	private pendingBulkDelete = false;
 	private pendingClearHistory = false;
+	private pendingSettingsPatch: SettingsPatch = {};
+	private pendingPatchRebuild = false;
 
 	constructor(app: App, plugin: AgentLinkPlugin) {
 		super(app, plugin);
@@ -38,8 +40,55 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		await this.plugin.applySettingsPatch(this.buildCurrentSettingsPatch(), options);
 	}
 
-	private async saveSettingsNoRebuild(): Promise<void> {
-		await this.applyCurrentSettings({ rebuildAdapter: false });
+	private async applySettingsPatch(
+		patch: SettingsPatch,
+		options?: {
+			rebuildAdapter?: boolean;
+			persist?: boolean;
+			refreshView?: boolean;
+			updateHistoryExpiry?: boolean;
+		},
+	): Promise<void> {
+		await this.plugin.applySettingsPatch(patch, options);
+	}
+
+	private async setSetting<K extends keyof AgentLinkSettings>(
+		key: K,
+		value: AgentLinkSettings[K],
+		options?: {
+			rebuildAdapter?: boolean;
+			persist?: boolean;
+			refreshView?: boolean;
+			updateHistoryExpiry?: boolean;
+		},
+	): Promise<void> {
+		await this.applySettingsPatch({ [key]: value } as SettingsPatch, options);
+	}
+
+	private scheduleSettingsPatch(
+		patch: SettingsPatch,
+		options?: { rebuildAdapter?: boolean },
+		delayMs = 250,
+	): void {
+		this.pendingSettingsPatch = { ...this.pendingSettingsPatch, ...patch };
+		this.pendingPatchRebuild = this.pendingPatchRebuild || (options?.rebuildAdapter ?? false);
+
+		if (this.delayedSaveHandle !== null) {
+			clearTimeout(this.delayedSaveHandle);
+		}
+
+		this.delayedSaveHandle = setTimeout(() => {
+			const pendingPatch = this.pendingSettingsPatch;
+			const rebuild = this.pendingPatchRebuild;
+			this.pendingSettingsPatch = {};
+			this.pendingPatchRebuild = false;
+			this.delayedSaveHandle = null;
+
+			void this.applySettingsPatch(pendingPatch, { rebuildAdapter: rebuild }).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				new Notice(`Failed to save settings: ${message}`);
+			});
+		}, delayMs);
 	}
 
 	private scheduleSettingsSave(options?: { rebuildAdapter?: boolean }, delayMs = 250): void {
@@ -54,10 +103,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				new Notice(`Failed to save settings: ${message}`);
 			});
 		}, delayMs);
-	}
-
-	private scheduleNoRebuildSave(delayMs = 250): void {
-		this.scheduleSettingsSave({ rebuildAdapter: false }, delayMs);
 	}
 
 	private parsePositiveInteger(value: string): number | null {
@@ -465,8 +510,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle(toggle => {
 				toggle.setValue(this.plugin.settings.enableAcpRegistrySync)
 					.onChange(async (value) => {
-						this.plugin.settings.enableAcpRegistrySync = value;
-						await this.saveSettingsNoRebuild();
+						await this.setSetting('enableAcpRegistrySync', value, { rebuildAdapter: false });
 					});
 			});
 
@@ -480,8 +524,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					.onChange((value) => {
 						const n = parseInt(value, 10);
 						if (!isNaN(n) && n >= 1 && n <= 168) {
-							this.plugin.settings.acpRegistrySyncIntervalHours = n;
-							this.scheduleSettingsSave({ rebuildAdapter: false });
+							this.scheduleSettingsPatch({ acpRegistrySyncIntervalHours: n }, { rebuildAdapter: false });
 						}
 					});
 				text.inputEl.type = 'number';
@@ -554,8 +597,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					if (parsed === null) {
 						return;
 					}
-					this.plugin.settings.requestTimeoutMs = parsed;
-					this.scheduleNoRebuildSave();
+					this.scheduleSettingsPatch({ requestTimeoutMs: parsed }, { rebuildAdapter: false });
 				});
 			});
 
@@ -564,8 +606,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('Automatically reconnect when the backend connection is lost.')
 			.addToggle(
 				(t) => t.setValue(this.plugin.settings.autoReconnect).onChange(async (v) => {
-					this.plugin.settings.autoReconnect = v;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('autoReconnect', v, { rebuildAdapter: false });
 				})
 			);
 
@@ -583,8 +624,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				dropdown.addOption('custom', 'Custom executable/path');
 				dropdown.setValue(this.plugin.settings.terminalShell);
 				dropdown.onChange(async (value) => {
-					this.plugin.settings.terminalShell = value as TerminalShellOption;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('terminalShell', value as TerminalShellOption, { rebuildAdapter: false });
 				});
 			});
 	}
@@ -597,8 +637,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				ta.setValue(this.plugin.settings.systemPrompt)
 					.setPlaceholder('You are a helpful AI assistant.')
 					.onChange((v) => {
-						this.plugin.settings.systemPrompt = v;
-						this.scheduleSettingsSave({ rebuildAdapter: false });
+						this.scheduleSettingsPatch({ systemPrompt: v }, { rebuildAdapter: false });
 					});
 				ta.inputEl.rows = 3;
 				ta.inputEl.style.width = '100%';
@@ -609,8 +648,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('Print verbose debug messages to the developer console.')
 			.addToggle(
 				(t) => t.setValue(this.plugin.settings.enableDebugLog).onChange(async (v) => {
-					this.plugin.settings.enableDebugLog = v;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('enableDebugLog', v, { rebuildAdapter: false });
 				})
 			);
 
@@ -626,8 +664,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					if (parsed === null) {
 						return;
 					}
-					this.plugin.settings.acpConnectionCacheTtlMinutes = parsed;
-					this.scheduleNoRebuildSave();
+					this.scheduleSettingsPatch({ acpConnectionCacheTtlMinutes: parsed }, { rebuildAdapter: false });
 				});
 			});
 
@@ -639,8 +676,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					text.setPlaceholder(process.platform === 'win32' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : '/bin/bash');
 					text.setValue(this.plugin.settings.terminalShellCustomPath);
 					text.onChange((value) => {
-						this.plugin.settings.terminalShellCustomPath = value;
-						this.scheduleNoRebuildSave();
+						this.scheduleSettingsPatch({ terminalShellCustomPath: value }, { rebuildAdapter: false });
 					});
 				});
 		} else {
@@ -657,8 +693,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('Automatically confirm read-only operations (read_file, list_dir, search).')
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.autoConfirmRead).onChange(async (v) => {
-					this.plugin.settings.autoConfirmRead = v;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('autoConfirmRead', v, { rebuildAdapter: false });
 				})
 			);
 
@@ -667,8 +702,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('DANGER: Automatically confirm file modifications without review!')
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.autoConfirmEdit).onChange(async (v) => {
-					this.plugin.settings.autoConfirmEdit = v;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('autoConfirmEdit', v, { rebuildAdapter: false });
 				})
 			);
 
@@ -677,8 +711,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('Display agent thinking/reasoning process in chat.')
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.showThinking).onChange(async (v) => {
-					this.plugin.settings.showThinking = v;
-					await this.saveSettingsNoRebuild();
+					await this.setSetting('showThinking', v, { rebuildAdapter: false });
 				})
 			);
 	}
@@ -699,8 +732,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					if (parsed === null) {
 						return;
 					}
-					this.plugin.settings.sessionHistoryExpiryDays = parsed;
-					this.scheduleNoRebuildSave();
+					this.scheduleSettingsPatch({ sessionHistoryExpiryDays: parsed }, { rebuildAdapter: false });
 				});
 			});
 

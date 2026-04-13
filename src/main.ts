@@ -262,13 +262,14 @@ export default class AgentLinkPlugin extends Plugin {
 		if (!this.settingsEffects) {
 			this.settingsEffects = this.createSettingsEffects();
 		}
+		const previous = this.settings;
 		const next = this.settingsStore.applyPatch(patch);
 		this.settings = next;
 		const flags = createSettingsEffectFlags({
 			persist: options?.persist,
-			rebuildAdapter: options?.rebuildAdapter,
+			rebuildAdapter: options?.rebuildAdapter ?? this.shouldRebuildAdapterForPatch(patch),
 			refreshView: options?.refreshView,
-			updateHistoryExpiry: options?.updateHistoryExpiry,
+			updateHistoryExpiry: options?.updateHistoryExpiry ?? this.shouldUpdateHistoryExpiryForPatch(previous, next, patch),
 		});
 		await this.applySettingsEffects(flags);
 	}
@@ -375,6 +376,21 @@ export default class AgentLinkPlugin extends Plugin {
 
 	private async applySettingsEffects(flags: SettingsEffectFlags): Promise<void> {
 		await this.settingsEffects.apply(this.settings, flags);
+	}
+
+	private shouldRebuildAdapterForPatch(patch: SettingsPatch): boolean {
+		return patch.activeBackendId !== undefined || patch.backends !== undefined;
+	}
+
+	private shouldUpdateHistoryExpiryForPatch(
+		previous: AgentLinkSettings,
+		next: AgentLinkSettings,
+		patch: SettingsPatch,
+	): boolean {
+		if (patch.sessionHistoryExpiryDays === undefined) {
+			return false;
+		}
+		return previous.sessionHistoryExpiryDays !== next.sessionHistoryExpiryDays;
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

@@ -9,6 +9,31 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I2：Settings 保存链路收敛与 effect flag 规则
+
+**实现范围**:
+- settings patch 副作用判定
+- 高频设置项改为 patch 驱动
+
+**完成内容**:
+- `main.applySettingsPatch()` 新增自动判定：
+  - `backends/activeBackendId` 变更才触发 adapter rebuild
+  - `sessionHistoryExpiryDays` 变更才触发 history expiry 更新
+- `settings-tab` 新增 `setSetting()` / `applySettingsPatch()` / `scheduleSettingsPatch()`，支持 patch 合并与防抖批量提交
+- 高频配置项（timeout/systemPrompt/debug/tool-safety/terminal/history-expiry 等）改为直接发 patch，不再先改全量 settings 再保存
+- `01-tasks.md` 标记 I2 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/main.ts`
+- `src/settings/settings-tab.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I1：SettingsStore / SettingsEffects 分层骨架
 
 **实现范围**:
