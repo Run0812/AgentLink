@@ -6,12 +6,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  # ──────────────────────────────────────────────────────────────
-  # Job 1: Install / Lint / Test / Build
-  # ──────────────────────────────────────────────────────────────
   ci:
     name: Install / Lint / Test / Build
     runs-on: ubuntu-latest
@@ -44,29 +40,3 @@ jobs:
             fi
           done
           echo "Build artifacts present"
-
-  # ──────────────────────────────────────────────────────────────
-  # Job 2: AI Code Review
-  # Blocks only on: high-probability severe bugs, obvious build
-  # failures, manifest/version inconsistencies, Obsidian guideline
-  # violations. All other feedback is advisory only.
-  # Requires secret: ANTHROPIC_API_KEY (optional – skipped if absent)
-  # ──────────────────────────────────────────────────────────────
-  ai-review:
-    name: AI Code Review
-    runs-on: ubuntu-latest
-    # Run independently of the ci job so review feedback is always posted
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Run AI Review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: node .github/scripts/ai-review.mjs
