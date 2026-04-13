@@ -131,10 +131,14 @@ export function buildWorkspaceFileUri(basePath: string, relativePath: string): s
 		throw new Error(`Workspace relative path is invalid: ${relativePath}`);
 	}
 
-	const absolutePath = `${normalizedBasePath}/${normalizedRelativePath}`;
+	const separator = normalizedBasePath.endsWith('/') ? '' : '/';
+	const absolutePath = `${normalizedBasePath}${separator}${normalizedRelativePath}`;
 	if (isWindowsAbsolutePath(absolutePath)) {
 		const [drive, ...segments] = absolutePath.split('/');
-		const encodedSegments = segments.map((segment) => encodeURIComponent(segment)).join('/');
+		const encodedSegments = segments
+			.filter((segment) => segment.length > 0)
+			.map((segment) => encodeURIComponent(segment))
+			.join('/');
 		return encodedSegments ? `file:///${drive}/${encodedSegments}` : `file:///${drive}`;
 	}
 
