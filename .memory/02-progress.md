@@ -9,6 +9,26 @@
 
 ---
 
+## 2026-04-13 - 修复 review commit 引入的 package.json 重复键与 lockfile 版本冲突
+
+**实现范围**:
+- 依赖声明修复
+- CI 安装一致性恢复
+
+**完成内容**:
+- 检查最新 commit（`88324ad`）后确认 `package.json` 的 `devDependencies` 存在重复键（`builtin-modules`、`obsidian`、`typescript`）
+- 删除重复键并恢复与 `package-lock.json` 一致的依赖版本（`typescript` 回到 `^6.0.2`）
+- 本地执行 `npm ci --ignore-scripts` 验证 lockfile 与 package 声明一致，不再出现 `EUSAGE` 版本不匹配错误
+
+**测试结果**:
+- `npm ci --ignore-scripts` 通过
+- `npm run lint` 通过
+
+**相关文件**:
+- `package.json`
+
+---
+
 ## 2026-04-13 - 测试去除硬编码绝对路径，改为动态路径构造
 
 **实现范围**:
