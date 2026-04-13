@@ -9,6 +9,36 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I5：ACP Adapter 内部拆分（transport / mapper / session-state）
+
+**实现范围**:
+- ACP adapter 内部职责拆分，不改变 `AgentAdapter` 对外契约
+- 保持 ACP 连接、会话与映射行为一致
+
+**完成内容**:
+- 新增 `src/adapters/acp/acp-transport.ts`，承接进程启动、stream 建连、进程清理
+- 新增 `src/adapters/acp/acp-protocol-mapper.ts`，承接 config/mode/command/usage 映射逻辑
+- 新增 `src/adapters/acp/acp-session-state.ts`，承接会话状态字段与 reset
+- `acp-bridge-adapter.ts` 改为组合上述模块并保留编排职责：
+  - `startBridgeProcess/createConnection` 委托给 `AcpTransport`
+  - `map* / parseContextUsage / describeConfigOptions` 委托给 `AcpProtocolMapper`
+  - session 相关字段统一收敛到 `AcpSessionState`
+- 增加兼容访问器（`sessionId/configOptions/sessionModes/...`），确保现有测试和内部调用不回归
+- `01-tasks.md` 标记 I5 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/acp-bridge-adapter.test.ts` 通过（22 tests）
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/adapters/acp/acp-transport.ts`
+- `src/adapters/acp/acp-protocol-mapper.ts`
+- `src/adapters/acp/acp-session-state.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I4：提取 Composer / Message Renderer 并补齐会话持久化触发点
 
 **实现范围**:
