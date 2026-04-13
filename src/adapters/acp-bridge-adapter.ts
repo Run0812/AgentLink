@@ -5,8 +5,6 @@
  * 参考: https://github.com/agentclientprotocol/typescript-sdk
  * ──────────────────────────────────────────────────────────────────────── */
 
-import { spawn, ChildProcess } from 'node:child_process';
-import { Writable, Readable } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
 import { App, TFile } from 'obsidian';
 
@@ -20,8 +18,6 @@ import {
 	ToolCall,
 	ToolResult,
 	ConfigOption,
-	ConfigOptionValue,
-	ConfigOptionCategory,
 	AcpBridgeBackendConfig,
 	Skill,
 	AvailableCommand,
@@ -31,13 +27,15 @@ import {
 } from '../core/types';
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
-import { ProcessManager } from '../services/process-manager';
 import {
 	buildWorkspaceFileUri as buildVaultWorkspaceFileUri,
 	ensureVaultParentFolders,
 	resolveVaultRelativePath,
 	sliceFileContent,
 } from '../services/vault-paths';
+import { AcpTransport } from './acp/acp-transport';
+import { AcpProtocolMapper } from './acp/acp-protocol-mapper';
+import { AcpSessionState } from './acp/acp-session-state';
 
 // ============================================================================
 // Adapter Configuration (using shared types)
@@ -291,8 +289,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	private config: AcpBridgeAdapterConfig;
 	private state: AgentStatusState = 'disconnected';
-	private bridgeProcess: ChildProcess | null = null;
-	private processManager = new ProcessManager();
+	private transport = new AcpTransport();
+	private protocolMapper = new AcpProtocolMapper();
+	private sessionState = new AcpSessionState();
 	private callbacks: AcpAdapterCallbacks = {};
 	
 	// SDK 连接
@@ -301,15 +300,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private connectionPromise: Promise<void> | null = null;
 	
 	// Session
-	private sessionId: string | null = null;
 	private serverCapabilities: AgentCapability[] = [];
 	private authMethods: acp.AuthMethod[] = [];
-	private configOptions: ConfigOption[] = [];
-	private sessionModes: SessionModeOption[] = [];
-	private availableCommands: AvailableCommand[] = [];
-	private plan: PlanEntry[] = [];
-	private currentMode: string | null = null;
-	private contextUsage: ContextUsageState | null = null;
 	private sessionStateListeners = new Set<() => void>();
 	
 	// Streaming handlers
@@ -317,6 +309,63 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private responseBuffer: string[] = [];
 	private thinkingBuffer: string[] = [];
 	private onThinkingChunk?: (text: string) => void;
+
+	// Backward-compatible field access used by existing tests/internal callers.
+	private get sessionId(): string | null {
+		return this.sessionState.sessionId;
+	}
+
+	private set sessionId(value: string | null) {
+		this.sessionState.sessionId = value;
+	}
+
+	private get configOptions(): ConfigOption[] {
+		return this.sessionState.configOptions;
+	}
+
+	private set configOptions(value: ConfigOption[]) {
+		this.sessionState.configOptions = value;
+	}
+
+	private get sessionModes(): SessionModeOption[] {
+		return this.sessionState.sessionModes;
+	}
+
+	private set sessionModes(value: SessionModeOption[]) {
+		this.sessionState.sessionModes = value;
+	}
+
+	private get availableCommands(): AvailableCommand[] {
+		return this.sessionState.availableCommands;
+	}
+
+	private set availableCommands(value: AvailableCommand[]) {
+		this.sessionState.availableCommands = value;
+	}
+
+	private get plan(): PlanEntry[] {
+		return this.sessionState.plan;
+	}
+
+	private set plan(value: PlanEntry[]) {
+		this.sessionState.plan = value;
+	}
+
+	private get currentMode(): string | null {
+		return this.sessionState.currentMode;
+	}
+
+	private set currentMode(value: string | null) {
+		this.sessionState.currentMode = value;
+	}
+
+	private get contextUsage(): ContextUsageState | null {
+		return this.sessionState.contextUsage;
+	}
+
+	private set contextUsage(value: ContextUsageState | null) {
+		this.sessionState.contextUsage = value;
+	}
 
 	constructor(config: AcpBridgeAdapterConfig) {
 		this.config = config;
@@ -347,7 +396,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// ── Connection Management ────────────────────────────────────────────────
 
 	async connect(): Promise<void> {
-		if ((this.state === 'connected' || this.state === 'busy') && this.connection && this.sessionId) {
+		if ((this.state === 'connected' || this.state === 'busy') && this.connection && this.sessionState.sessionId) {
 			console.log('[ACP Adapter] Already connected');
 			return;
 		}
@@ -385,7 +434,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			await this.connectionPromise;
 		}
 
-		if (!this.connection || !this.sessionId || this.state === 'disconnected' || this.state === 'error') {
+		if (!this.connection || !this.sessionState.sessionId || this.state === 'disconnected' || this.state === 'error') {
 			await this.connect();
 			return;
 		}
@@ -409,12 +458,12 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		console.log('[ACP Adapter] ========================================');
 		console.log('[ACP Adapter] sendMessage called');
 		
-		if (this.state === 'disconnected' || this.state === 'connecting' || !this.connection || !this.sessionId) {
+		if (this.state === 'disconnected' || this.state === 'connecting' || !this.connection || !this.sessionState.sessionId) {
 			console.log('[ACP Adapter] Session not ready, connecting first...');
 			await this.connect();
 		}
 
-		if (!this.connection || !this.sessionId) {
+		if (!this.connection || !this.sessionState.sessionId) {
 			throw new ConnectionError('Connection or session not established');
 		}
 
@@ -425,7 +474,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		this.onThinkingChunk = options?.onThinkingChunk;
 
 		console.log('[ACP Adapter] Sending prompt:', input.prompt);
-		console.log('[ACP Adapter] Session ID:', this.sessionId);
+		console.log('[ACP Adapter] Session ID:', this.sessionState.sessionId);
 
 		try {
 			// 构建 prompt content blocks
@@ -448,7 +497,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			// 使用 SDK 发送 prompt
 			console.log('[ACP Adapter] Calling connection.prompt()...');
 			const response = await this.connection.prompt({
-				sessionId: this.sessionId,
+				sessionId: this.sessionState.sessionId,
 				prompt: contentBlocks,
 			});
 
@@ -482,11 +531,11 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	async cancel(): Promise<void> {
 		console.log('[ACP Adapter] Cancel requested');
 		
-		if (this.connection && this.sessionId) {
+		if (this.connection && this.sessionState.sessionId) {
 			try {
 				console.log('[ACP Adapter] Sending cancel notification');
 				await this.connection.cancel({
-					sessionId: this.sessionId,
+					sessionId: this.sessionState.sessionId,
 				});
 				console.log('[ACP Adapter] Cancel sent successfully');
 			} catch (error) {
@@ -500,7 +549,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	getStatus(): AgentStatus {
 		return { 
 			state: this.state,
-			message: this.sessionId ? `Session: ${this.sessionId.slice(0, 8)}...` : undefined,
+			message: this.sessionState.sessionId ? `Session: ${this.sessionState.sessionId.slice(0, 8)}...` : undefined,
 		};
 	}
 
@@ -529,11 +578,11 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	// ── Config Options (ACP Session Config Options) ────────────────────────
 
 	getConfigOptions(): ConfigOption[] {
-		if (this.configOptions.length > 0) {
-			return this.configOptions;
+		if (this.sessionState.configOptions.length > 0) {
+			return this.sessionState.configOptions;
 		}
 
-		if (this.sessionModes.length === 0) {
+		if (this.sessionState.sessionModes.length === 0) {
 			return [];
 		}
 
@@ -543,8 +592,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			description: 'Agent session mode',
 			category: 'mode',
 			type: 'select',
-			currentValue: this.currentMode ?? this.sessionModes[0]?.id ?? '',
-			options: this.sessionModes.map((mode) => ({
+			currentValue: this.sessionState.currentMode ?? this.sessionState.sessionModes[0]?.id ?? '',
+			options: this.sessionState.sessionModes.map((mode) => ({
 				value: mode.id,
 				name: mode.name,
 				description: mode.description,
@@ -553,29 +602,29 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	getAvailableCommands(): AvailableCommand[] {
-		return this.availableCommands;
+		return this.sessionState.availableCommands;
 	}
 
 	getPlan(): PlanEntry[] {
-		return this.plan;
+		return this.sessionState.plan;
 	}
 
 	getCurrentMode(): string | null {
-		return this.currentMode;
+		return this.sessionState.currentMode;
 	}
 
 	getSessionModes(): SessionModeOption[] {
-		return this.sessionModes;
+		return this.sessionState.sessionModes;
 	}
 
 	getContextUsage(): ContextUsageState | null {
-		return this.contextUsage;
+		return this.sessionState.contextUsage;
 	}
 
 	async setConfigOption(configId: string, value: string | boolean): Promise<ConfigOption[]> {
 		console.log('[ACP Adapter] Setting config option:', configId, '=', value);
 		
-		if (!this.connection || !this.sessionId) {
+		if (!this.connection || !this.sessionState.sessionId) {
 			throw new Error('Not connected');
 		}
 
@@ -583,10 +632,10 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			const modeId = String(value);
 			console.log('[ACP Adapter] Using session/set_mode fallback:', modeId);
 			await this.connection.setSessionMode({
-				sessionId: this.sessionId,
+				sessionId: this.sessionState.sessionId,
 				modeId,
 			});
-			this.currentMode = modeId;
+			this.sessionState.currentMode = modeId;
 			this.emitSessionStateChange();
 			return this.getConfigOptions();
 		}
@@ -594,19 +643,19 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		const response = await this.connection.setSessionConfigOption(
 			typeof value === 'boolean'
 				? {
-					sessionId: this.sessionId,
+					sessionId: this.sessionState.sessionId,
 					configId,
 					type: 'boolean',
 					value,
 				}
 				: {
-					sessionId: this.sessionId,
+					sessionId: this.sessionState.sessionId,
 					configId,
 					value,
 				},
 		);
-		this.configOptions = this.mapConfigOptions(response.configOptions);
-		console.log('[ACP Adapter] Config option updated from agent response:', this.describeConfigOptions(this.configOptions));
+		this.sessionState.configOptions = this.mapConfigOptions(response.configOptions);
+		console.log('[ACP Adapter] Config option updated from agent response:', this.describeConfigOptions(this.sessionState.configOptions));
 		this.emitSessionStateChange();
 		return this.getConfigOptions();
 	}
@@ -753,34 +802,34 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	handleAvailableCommands(commands: Array<{ name: string; description: string; input?: unknown | null }> = []): void {
-		this.availableCommands = commands.map((command) => ({
+		this.sessionState.availableCommands = commands.map((command) => ({
 			name: command.name,
 			description: command.description,
 			input: this.mapAvailableCommandInput(command.input),
 		}));
-		console.log('[ACP Adapter] Available commands updated:', this.availableCommands.map((command) => command.name).join(', ') || '(none)');
+		console.log('[ACP Adapter] Available commands updated:', this.sessionState.availableCommands.map((command) => command.name).join(', ') || '(none)');
 		this.emitSessionStateChange();
 	}
 
 	handleCurrentModeUpdate(modeId: string | null | undefined): void {
-		this.currentMode = modeId ?? null;
-		console.log('[ACP Adapter] Current mode updated:', this.currentMode ?? '(none)');
+		this.sessionState.currentMode = modeId ?? null;
+		console.log('[ACP Adapter] Current mode updated:', this.sessionState.currentMode ?? '(none)');
 		this.emitSessionStateChange();
 	}
 
 	handleConfigOptionUpdate(configOptions: unknown): void {
-		this.configOptions = this.mapConfigOptions(configOptions);
-		console.log('[ACP Adapter] Config options updated:', this.describeConfigOptions(this.configOptions));
+		this.sessionState.configOptions = this.mapConfigOptions(configOptions);
+		console.log('[ACP Adapter] Config options updated:', this.describeConfigOptions(this.sessionState.configOptions));
 		this.emitSessionStateChange();
 	}
 
 	handlePlan(entries: PlanEntry[] = []): void {
-		this.plan = entries.map((entry) => ({
+		this.sessionState.plan = entries.map((entry) => ({
 			content: entry.content,
 			priority: entry.priority,
 			status: entry.status,
 		}));
-		console.log('[ACP Adapter] Plan updated:', this.plan.map((entry) => `${entry.status}:${entry.content}`).join(' | ') || '(none)');
+		console.log('[ACP Adapter] Plan updated:', this.sessionState.plan.map((entry) => `${entry.status}:${entry.content}`).join(' | ') || '(none)');
 		this.emitSessionStateChange();
 	}
 
@@ -790,7 +839,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			return;
 		}
 
-		this.contextUsage = parsed;
+		this.sessionState.contextUsage = parsed;
 		console.log(
 			'[ACP Adapter] Context usage updated:',
 			`${parsed.usedTokens}/${parsed.maxTokens ?? '?'}`,
@@ -811,75 +860,38 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		console.log('[ACP Adapter] Starting bridge process...');
 		console.log('[ACP Adapter] Command:', command, args);
 
-		return new Promise((resolve, reject) => {
-			try {
-				this.bridgeProcess = spawn(command, args || [], {
-					stdio: ['pipe', 'pipe', 'pipe'],
-				});
-
-				this.processManager.track(this.bridgeProcess);
-
-				// Handle stderr (logs)
-				this.bridgeProcess.stderr?.on('data', (data: Buffer) => {
-					const str = data.toString();
-					console.log('[ACP Agent stderr]:', str.trim());
-				});
-
-				// Handle process errors
-				this.bridgeProcess.on('error', (error) => {
-					console.error('[ACP Adapter] Bridge process error:', error);
-					reject(new Error(`Failed to start bridge process: ${error.message}`));
-				});
-
-				// Handle process exit
-				this.bridgeProcess.on('exit', (code) => {
-					if (code !== 0 && code !== null && this.state !== 'disconnected') {
-						console.error('[ACP Adapter] Bridge process exited with code:', code);
-						this.setState('error');
-					}
-				});
-
-				// Wait for process to be ready
-				setTimeout(() => {
-					if (this.bridgeProcess) {
-						console.log('[ACP Adapter] Bridge process started, PID:', this.bridgeProcess.pid);
-						resolve();
-					}
-				}, 1000);
-
-			} catch (error) {
-				reject(error);
-			}
+		const process = await this.transport.start(command, args, {
+			onStderr: (line) => {
+				console.log('[ACP Agent stderr]:', line.trim());
+			},
+			onError: (error) => {
+				console.error('[ACP Adapter] Bridge process error:', error);
+			},
+			onExit: (code) => {
+				if (code !== 0 && code !== null && this.state !== 'disconnected') {
+					console.error('[ACP Adapter] Bridge process exited with code:', code);
+					this.setState('error');
+				}
+			},
 		});
+		console.log('[ACP Adapter] Bridge process started, PID:', process.pid);
 	}
 
 	private async createConnection(): Promise<void> {
-		if (!this.bridgeProcess?.stdin || !this.bridgeProcess?.stdout) {
+		const bridgeProcess = this.transport.getBridgeProcess();
+		if (!bridgeProcess) {
 			throw new Error('Bridge process not properly started');
 		}
 
 		console.log('[ACP Adapter] Creating SDK connection...');
-
-		// 转换 Node.js streams 到 Web Streams
-		const input = Writable.toWeb(this.bridgeProcess.stdin) as WritableStream<Uint8Array>;
-		const output = Readable.toWeb(this.bridgeProcess.stdout) as ReadableStream<Uint8Array>;
-
-		// 创建 ndJsonStream
-		console.log('[ACP Adapter] Creating ndJsonStream...');
-		const stream = acp.ndJsonStream(input, output);
-
-		// 创建 ClientSideConnection
-		console.log('[ACP Adapter] Creating ClientSideConnection...');
-		this.connection = new acp.ClientSideConnection(
+		this.connection = this.transport.createConnection(
+			bridgeProcess,
 			() => this.client,
-			stream
+			() => {
+				console.log('[ACP Adapter] Connection aborted/closed');
+				this.setState('disconnected');
+			},
 		);
-
-		// 监听连接关闭
-		this.connection.signal.addEventListener('abort', () => {
-			console.log('[ACP Adapter] Connection aborted/closed');
-			this.setState('disconnected');
-		});
 
 		console.log('[ACP Adapter] SDK connection created');
 	}
@@ -951,7 +963,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 			this.applySessionResponse(response);
 			console.log('[ACP Adapter] ✅ Session created!');
-			console.log('[ACP Adapter] Session ID:', this.sessionId);
+			console.log('[ACP Adapter] Session ID:', this.sessionState.sessionId);
 
 		} catch (error) {
 			console.error('[ACP Adapter] Create session failed:', error);
@@ -963,17 +975,17 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private applySessionResponse(response: acp.NewSessionResponse): void {
-		this.sessionId = response.sessionId;
-		this.sessionModes = this.mapSessionModes(response.modes?.availableModes);
-		this.currentMode = response.modes?.currentModeId ?? null;
+		this.sessionState.sessionId = response.sessionId;
+		this.sessionState.sessionModes = this.mapSessionModes(response.modes?.availableModes);
+		this.sessionState.currentMode = response.modes?.currentModeId ?? null;
 		console.log('[ACP Adapter] Current mode:', response.modes?.currentModeId);
 		console.log('[ACP Adapter] Current model:', response.models?.currentModelId);
-		console.log('[ACP Adapter] Available modes:', this.sessionModes.map((mode) => mode.id).join(', ') || '(none)');
+		console.log('[ACP Adapter] Available modes:', this.sessionState.sessionModes.map((mode) => mode.id).join(', ') || '(none)');
 
 		const responseWithConfig = response as acp.NewSessionResponse & { configOptions?: unknown };
 		if (responseWithConfig.configOptions && Array.isArray(responseWithConfig.configOptions) && responseWithConfig.configOptions.length > 0) {
-			this.configOptions = this.mapConfigOptions(responseWithConfig.configOptions);
-			console.log('[ACP Adapter] Config options received:', this.describeConfigOptions(this.configOptions));
+			this.sessionState.configOptions = this.mapConfigOptions(responseWithConfig.configOptions);
+			console.log('[ACP Adapter] Config options received:', this.describeConfigOptions(this.sessionState.configOptions));
 		}
 		this.emitSessionStateChange();
 	}
@@ -1153,7 +1165,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			this.setState('connected');
 			console.log('[ACP Adapter] ========================================');
 			console.log('[ACP Adapter] ✅ Connected successfully!');
-			console.log('[ACP Adapter] Session ID:', this.sessionId);
+			console.log('[ACP Adapter] Session ID:', this.sessionState.sessionId);
 		} catch (error) {
 			this.setState('error');
 			await this.cleanup();
@@ -1176,7 +1188,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		try {
 			await this.createSession();
 			this.setState('connected');
-			console.log('[ACP Adapter] Fresh ACP session ready:', this.sessionId);
+			console.log('[ACP Adapter] Fresh ACP session ready:', this.sessionState.sessionId);
 		} catch (error) {
 			this.setState('error');
 			console.error('[ACP Adapter] Reset session failed:', error);
@@ -1206,15 +1218,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private mapAvailableCommandInput(input: unknown): AvailableCommand['input'] {
-		if (!input || typeof input !== 'object') {
-			return null;
-		}
-
-		if ('hint' in input && typeof input.hint === 'string') {
-			return { hint: input.hint };
-		}
-
-		return null;
+		return this.protocolMapper.mapAvailableCommandInput(input);
 	}
 
 	private mapPermissionToolCall(toolCall: unknown): { id: string; tool: string; params: Record<string, unknown>; title: string } {
@@ -1353,148 +1357,24 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private mapSessionModes(modes: unknown): SessionModeOption[] {
-		if (!Array.isArray(modes)) {
-			return [];
-		}
-
-		return modes
-			.filter((mode): mode is { id: string; name: string; description?: string | null } =>
-				Boolean(mode && typeof mode === 'object' && 'id' in mode && 'name' in mode),
-			)
-			.map((mode) => ({
-				id: mode.id,
-				name: mode.name,
-				description: mode.description ?? undefined,
-			}));
+		return this.protocolMapper.mapSessionModes(modes);
 	}
 
 	private mapConfigOptions(configOptions: unknown): ConfigOption[] {
-		if (!Array.isArray(configOptions)) {
-			return [];
-		}
-
-		const mappedOptions: ConfigOption[] = [];
-
-		for (const option of configOptions) {
-			if (!option || typeof option !== 'object') {
-				continue;
-			}
-
-			const opt = option as {
-				id?: string;
-				name?: string;
-				description?: string;
-				category?: string;
-				type?: string;
-				currentValue?: string | boolean;
-				options?: Array<
-					{ value?: string; name?: string; description?: string } |
-					{ group?: string; name?: string; options?: Array<{ value?: string; name?: string; description?: string }> }
-				>;
-			};
-
-			if (!opt.id || !opt.name) {
-				continue;
-			}
-
-			if (opt.type === 'boolean' && typeof opt.currentValue === 'boolean') {
-				mappedOptions.push({
-					id: opt.id,
-					name: opt.name,
-					description: opt.description ?? undefined,
-					category: this.mapConfigOptionCategory(opt.category),
-					type: 'boolean',
-					currentValue: opt.currentValue,
-				});
-				continue;
-			}
-
-			if (opt.type !== 'select' || !Array.isArray(opt.options)) {
-				continue;
-			}
-
-			const values = this.flattenConfigOptionValues(opt.options);
-			if (values.length === 0) {
-				continue;
-			}
-
-			mappedOptions.push({
-				id: opt.id,
-				name: opt.name,
-				description: opt.description ?? undefined,
-				category: this.mapConfigOptionCategory(opt.category),
-				type: 'select',
-				currentValue: typeof opt.currentValue === 'string' ? opt.currentValue : '',
-				options: values,
-			});
-		}
-
-		return mappedOptions;
-	}
-
-	private flattenConfigOptionValues(
-		options: Array<
-			{ value?: string; name?: string; description?: string } |
-			{ group?: string; name?: string; options?: Array<{ value?: string; name?: string; description?: string }> }
-		>,
-	): ConfigOptionValue[] {
-		const values: ConfigOptionValue[] = [];
-
-		for (const option of options) {
-			if (!option || typeof option !== 'object') {
-				continue;
-			}
-
-			if ('value' in option && typeof option.value === 'string' && typeof option.name === 'string') {
-				values.push({
-					value: option.value,
-					name: option.name,
-					description: option.description ?? undefined,
-				});
-				continue;
-			}
-
-			if ('options' in option && Array.isArray(option.options)) {
-				const groupName = typeof option.name === 'string' ? option.name : undefined;
-				for (const nested of option.options) {
-					if (!nested?.value || !nested?.name) {
-						continue;
-					}
-					values.push({
-						value: nested.value,
-						name: groupName ? `${groupName} / ${nested.name}` : nested.name,
-						description: nested.description ?? undefined,
-					});
-				}
-			}
-		}
-
-		return values;
-	}
-
-	private mapConfigOptionCategory(category: unknown): ConfigOptionCategory | undefined {
-		if (category === 'mode' || category === 'model' || category === 'thought_level') {
-			return category;
-		}
-
-		if (typeof category === 'string' && category.startsWith('_')) {
-			return category as ConfigOptionCategory;
-		}
-
-		return undefined;
+		return this.protocolMapper.mapConfigOptions(configOptions);
 	}
 
 	private shouldUseModeFallback(configId: string, value: string | boolean): boolean {
 		return (
 			configId === 'mode' &&
 			typeof value === 'string' &&
-			this.configOptions.length === 0 &&
-			this.sessionModes.some((mode) => mode.id === value)
+			this.sessionState.configOptions.length === 0 &&
+			this.sessionState.sessionModes.some((mode) => mode.id === value)
 		);
 	}
 
 	private describeConfigOptions(configOptions: ConfigOption[]): string {
-		return configOptions.map((option) => `${option.id}=${String(option.currentValue)}`).join(', ') || '(none)';
+		return this.protocolMapper.describeConfigOptions(configOptions);
 	}
 
 	private handlePromptUsage(response: unknown): void {
@@ -1503,18 +1383,18 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			return;
 		}
 
-		this.contextUsage = {
-			...this.contextUsage,
+		this.sessionState.contextUsage = {
+			...this.sessionState.contextUsage,
 			...parsed,
-			maxTokens: parsed.maxTokens ?? this.contextUsage?.maxTokens,
+			maxTokens: parsed.maxTokens ?? this.sessionState.contextUsage?.maxTokens,
 			percentage:
-				parsed.maxTokens ?? this.contextUsage?.maxTokens
+				parsed.maxTokens ?? this.sessionState.contextUsage?.maxTokens
 					? Math.max(
 						0,
 						Math.min(
 							100,
 							Math.round(
-								(parsed.usedTokens / ((parsed.maxTokens ?? this.contextUsage?.maxTokens) as number)) * 100,
+								(parsed.usedTokens / ((parsed.maxTokens ?? this.sessionState.contextUsage?.maxTokens) as number)) * 100,
 							),
 						),
 					  )
@@ -1524,109 +1404,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private parseContextUsage(input: unknown): ContextUsageState | null {
-		if (!input || typeof input !== 'object') {
-			return null;
-		}
-
-		const record = input as Record<string, unknown>;
-		const usageRecord = this.asRecord(record.usage) ?? record;
-		const usedTokens = this.readNumberField(usageRecord, ['used', 'usedTokens', 'totalTokens', 'total_tokens']);
-		const maxTokens =
-			this.readNumberField(usageRecord, ['size', 'maxTokens', 'max_tokens', 'limit']) ??
-			this.readNestedNumberField(usageRecord, 'contextWindow', ['size', 'maxTokens', 'limit']);
-
-		if (usedTokens === null && maxTokens === null) {
-			return null;
-		}
-
-		const sections = this.parseUsageSections(usageRecord);
-		return {
-			usedTokens: usedTokens ?? this.contextUsage?.usedTokens ?? 0,
-			maxTokens: maxTokens ?? undefined,
-			percentage:
-				usedTokens !== null && maxTokens && maxTokens > 0
-					? Math.max(0, Math.min(100, Math.round((usedTokens / maxTokens) * 100)))
-					: undefined,
-			source: 'acp',
-			summary: typeof usageRecord.summary === 'string' ? usageRecord.summary : undefined,
-			sections,
-			lastUpdatedAt: Date.now(),
-		};
-	}
-
-	private parseUsageSections(record: Record<string, unknown>): ContextUsageState['sections'] {
-		const rawSections = Array.isArray(record.sections)
-			? record.sections
-			: Array.isArray(record.breakdown)
-				? record.breakdown
-				: null;
-
-		if (!rawSections) {
-			return undefined;
-		}
-
-		const sections = rawSections
-			.map((section) => {
-				const sectionRecord = this.asRecord(section);
-				if (!sectionRecord || typeof sectionRecord.title !== 'string' || !Array.isArray(sectionRecord.items)) {
-					return null;
-				}
-
-				const items = sectionRecord.items
-					.map((item) => {
-						const itemRecord = this.asRecord(item);
-						if (!itemRecord || typeof itemRecord.label !== 'string') {
-							return null;
-						}
-
-						const used = this.readNumberField(itemRecord, ['usedTokens', 'used', 'tokens']);
-						if (used === null) {
-							return null;
-						}
-
-						return {
-							label: itemRecord.label,
-							usedTokens: used,
-						};
-					})
-					.filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-				if (items.length === 0) {
-					return null;
-				}
-
-				return {
-					title: sectionRecord.title,
-					items,
-				};
-			})
-			.filter((section): section is NonNullable<typeof section> => Boolean(section));
-
-		return sections.length > 0 ? sections : undefined;
-	}
-
-	private asRecord(value: unknown): Record<string, unknown> | null {
-		return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-	}
-
-	private readNumberField(record: Record<string, unknown>, keys: string[]): number | null {
-		for (const key of keys) {
-			const value = record[key];
-			if (typeof value === 'number' && Number.isFinite(value)) {
-				return value;
-			}
-		}
-
-		return null;
-	}
-
-	private readNestedNumberField(record: Record<string, unknown>, key: string, nestedKeys: string[]): number | null {
-		const nested = this.asRecord(record[key]);
-		if (!nested) {
-			return null;
-		}
-
-		return this.readNumberField(nested, nestedKeys);
+		return this.protocolMapper.parseContextUsage(input, this.sessionState.contextUsage);
 	}
 
 	private setState(state: AgentStatusState): void {
@@ -1635,13 +1413,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private resetSessionState(): void {
-		this.sessionId = null;
-		this.configOptions = [];
-		this.sessionModes = [];
-		this.availableCommands = [];
-		this.plan = [];
-		this.currentMode = null;
-		this.contextUsage = null;
+		this.sessionState.reset();
 	}
 
 	private emitSessionStateChange(): void {
@@ -1658,11 +1430,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			this.connection = null;
 		}
 
-		if (this.bridgeProcess) {
-			console.log('[ACP Adapter] Killing bridge process...');
-			this.processManager.killAll();
-			this.bridgeProcess = null;
-		}
+		console.log('[ACP Adapter] Killing bridge process...');
+		this.transport.cleanup();
 
 		this.connectionPromise = null;
 		this.serverCapabilities = [];
@@ -1677,3 +1446,4 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		console.log('[ACP Adapter] Cleanup complete');
 	}
 }
+

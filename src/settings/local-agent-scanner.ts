@@ -10,9 +10,13 @@ import {
 } from './registry-utils';
 import { AcpAgentEditorModal } from './acp-agent-editor';
 
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const { promisify } = require('util');
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile) as (
+  file: string,
+  args?: string[],
+  options?: { timeout?: number; windowsHide?: boolean }
+) => Promise<{ stdout: string; stderr: string }>;
 const path = require('path');
 const fs = require('fs');
 
@@ -31,10 +35,15 @@ export interface DetectedAgentInfo extends AgentLaunchConfig {
  */
 async function getCommandPath(command: string): Promise<string | null> {
   try {
+    const commandName = command.trim().split(/\s+/)[0];
+    if (!commandName) {
+      return null;
+    }
+
     const platform = process.platform;
     const checkCmd = platform === 'win32' ? 'where' : 'which';
     
-    const { stdout } = await execAsync(`${checkCmd} ${command.split(' ')[0]}`, {
+    const { stdout } = await execFileAsync(checkCmd, [commandName], {
       timeout: 5000,
       windowsHide: true,
     });
@@ -53,7 +62,7 @@ async function getCommandPath(command: string): Promise<string | null> {
 async function checkNpxPackageLocal(packageName: string): Promise<{ installed: boolean; path?: string; version?: string }> {
   try {
     // Get npm global prefix
-    const { stdout: prefixStdout } = await execAsync('npm config get prefix', {
+    const { stdout: prefixStdout } = await execFileAsync('npm', ['config', 'get', 'prefix'], {
       timeout: 5000,
       windowsHide: true,
     });
@@ -133,7 +142,8 @@ async function checkUvxPackageLocal(packageName: string): Promise<{ installed: b
  * Verify if a binary command is actually available and get its path
  */
 async function verifyBinary(command: string): Promise<{ installed: boolean; path?: string; version?: string }> {
-  const commandPath = await getCommandPath(command);
+  const commandName = command.trim().split(/\s+/)[0];
+  const commandPath = await getCommandPath(commandName);
   if (!commandPath) {
     return { installed: false };
   }
@@ -143,7 +153,7 @@ async function verifyBinary(command: string): Promise<{ installed: boolean; path
     const versionFlags = ['--version', '-v', '-V', 'version'];
     for (const flag of versionFlags) {
       try {
-        const { stdout } = await execAsync(`${command} ${flag}`, {
+        const { stdout } = await execFileAsync(commandName, [flag], {
           timeout: 5000,
           windowsHide: true,
         });

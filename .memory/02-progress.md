@@ -9,6 +9,277 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I7：memory 文档收口与最终验收
+
+**实现范围**:
+- `01/02/03` memory 文档同步
+- 架构模块化 v1 最终门禁执行与验收记录
+
+**完成内容**:
+- `01-tasks.md` 标记 I7 完成，架构模块化 I1-I7 全部闭环
+- `03-bugs.md` 增补“架构模块化 v1 验收”记录（本轮未发现新增严重缺陷）
+- 对本轮迭代 commit 链路完成归档，可按 commit 粒度执行 `git revert` 回退
+
+**最终门禁结果**:
+- `npm run lint` 通过
+- `npm test` 通过（11 files, 101 tests）
+- `npm run build:quick` 通过
+
+**验收结论**:
+- 设置/聊天/ACP 主要行为保持可用
+- `settings-tab`、`chat-view`、`acp-bridge-adapter` 代码职责已明显收敛为编排层 + 子模块
+
+**相关文件**:
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+- `.memory/03-bugs.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I6：UI 工程化收口（重复 inline style 迁移）
+
+**实现范围**:
+- 不引入额外 UI 库
+- 抽取重复内联样式到 `styles.css`，保持交互语义不变
+
+**完成内容**:
+- `chat-view` 的以下重复样式迁移为 class：
+  - toolbar selector/button 样式
+  - header action button 样式
+  - toolbar dropdown/header/item 样式
+  - 单行省略文本样式
+  - 紧凑 send/stop 按钮样式
+  - 文件选择列表项 hover 样式
+- `chat-view` 的样式应用改为 `addClass + 少量动态变量/尺寸`
+- 保持原有交互逻辑与布局行为不变
+- `01-tasks.md` 标记 I6 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+- `npm test -- test/unit/acp-bridge-adapter.test.ts` 通过（22 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `styles.css`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I5：ACP Adapter 内部拆分（transport / mapper / session-state）
+
+**实现范围**:
+- ACP adapter 内部职责拆分，不改变 `AgentAdapter` 对外契约
+- 保持 ACP 连接、会话与映射行为一致
+
+**完成内容**:
+- 新增 `src/adapters/acp/acp-transport.ts`，承接进程启动、stream 建连、进程清理
+- 新增 `src/adapters/acp/acp-protocol-mapper.ts`，承接 config/mode/command/usage 映射逻辑
+- 新增 `src/adapters/acp/acp-session-state.ts`，承接会话状态字段与 reset
+- `acp-bridge-adapter.ts` 改为组合上述模块并保留编排职责：
+  - `startBridgeProcess/createConnection` 委托给 `AcpTransport`
+  - `map* / parseContextUsage / describeConfigOptions` 委托给 `AcpProtocolMapper`
+  - session 相关字段统一收敛到 `AcpSessionState`
+- 增加兼容访问器（`sessionId/configOptions/sessionModes/...`），确保现有测试和内部调用不回归
+- `01-tasks.md` 标记 I5 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/acp-bridge-adapter.test.ts` 通过（22 tests）
+
+**相关文件**:
+- `src/adapters/acp-bridge-adapter.ts`
+- `src/adapters/acp/acp-transport.ts`
+- `src/adapters/acp/acp-protocol-mapper.ts`
+- `src/adapters/acp/acp-session-state.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I4：提取 Composer / Message Renderer 并补齐会话持久化触发点
+
+**实现范围**:
+- ChatView 消息渲染与输入编排进一步拆分
+- 会话持久化触发点补齐（发送完成/切换/关闭/兜底）
+
+**完成内容**:
+- 新增 `MessageListRenderer`，承接 welcome/message/tool/file/thinking 渲染与重绘
+- 新增 `ComposerController`，承接输入文本序列化、光标选择管理、inline token 插入/移除
+- `chat-view` 将消息渲染与 composer 核心方法改为委托，保留生命周期与流程编排
+- 移除 `chat-view` 中大段重复渲染与输入 DOM 操作细节，职责收敛为 orchestration
+- 新增 `persistCurrentSession(reason)` 并接入关键时机：
+  - `finishStreaming`（发送完成/中断后）
+  - `loadSession`（切换会话前）
+  - `createNewSession`（新建前）
+  - `onClose`（视图关闭兜底）
+  - `clearConversation`（清空后）
+- `01-tasks.md` 标记 I4 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/controllers/message-list-renderer.ts`
+- `src/ui/controllers/composer-controller.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I3：ChatView Header/Toolbar 控制器化
+
+**实现范围**:
+- ChatView 的 header/history 与底部 toolbar 下拉逻辑解耦
+- 会话删除与切换行为保持不变
+
+**完成内容**:
+- 新增 `HeaderSessionController`，承接会话历史下拉与历史列表 modal 渲染
+- 新增 `ToolbarController`，承接 Agent/Model/Thinking 下拉渲染
+- `chat-view` 中 `openSessionList`、`renderHistoryDropdown`、`renderAgentDropdown`、`renderModelDropdown`、`renderThinkingDropdown` 改为控制器委托
+- `chat-view` 新增 `switchBackend` / `handleThinkingModeChange` / `deleteSession`，集中处理副作用与状态更新
+- 历史下拉删除按钮保持“原地二次确认”交互（`Delete -> Confirm`）
+- `01-tasks.md` 标记 I3 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/controllers/header-session-controller.ts`
+- `src/ui/controllers/toolbar-controller.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I2：Settings 保存链路收敛与 effect flag 规则
+
+**实现范围**:
+- settings patch 副作用判定
+- 高频设置项改为 patch 驱动
+
+**完成内容**:
+- `main.applySettingsPatch()` 新增自动判定：
+  - `backends/activeBackendId` 变更才触发 adapter rebuild
+  - `sessionHistoryExpiryDays` 变更才触发 history expiry 更新
+- `settings-tab` 新增 `setSetting()` / `applySettingsPatch()` / `scheduleSettingsPatch()`，支持 patch 合并与防抖批量提交
+- 高频配置项（timeout/systemPrompt/debug/tool-safety/terminal/history-expiry 等）改为直接发 patch，不再先改全量 settings 再保存
+- `01-tasks.md` 标记 I2 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/main.ts`
+- `src/settings/settings-tab.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 架构模块化 I1：SettingsStore / SettingsEffects 分层骨架
+
+**实现范围**:
+- settings 领域基础分层
+- settings-tab 与 plugin 保存链路解耦（骨架阶段）
+
+**完成内容**:
+- 新增 `settings-store`：`SettingsPatch`、`SettingsStore`、`InMemorySettingsStore`
+- 新增 `settings-effects`：`SettingsEffects`、`SettingsEffectFlags`、`PluginSettingsEffects`
+- `main.ts` 接入 settings store/effects，并新增 `applySettingsPatch(patch, options)` 入口
+- `settings-tab` 的保存入口改为 `applyCurrentSettings()`，由 patch 流程统一进入 plugin 侧
+- 在 `01-tasks.md` 增加“架构模块化 v1”清单，并标记 I1 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts` 通过（8 tests）
+
+**相关文件**:
+- `src/settings/settings-store.ts`
+- `src/settings/settings-effects.ts`
+- `src/main.ts`
+- `src/settings/settings-tab.ts`
+- `.memory/01-tasks.md`
+
+---
+
+## 2026-04-13 - 设置页改为四分 Tab（Agent / Agent advanced / History / ACP subscription）
+
+**实现范围**:
+- 设置页信息架构重组
+- 首页保留高频 Agent 配置
+
+**完成内容**:
+- 顶部 Tab 调整为 4 个：`Agent`、`Agent advanced`、`History`、`ACP subscription`
+- `Agent` Tab 保留高频项：Backend 管理、Request Timeout、Auto-reconnect、Terminal shell 选择
+- `Agent advanced` Tab 聚合低频高级项：System Prompt、Debug Log、ACP connection cache TTL、Tool safety 选项
+- `Agent advanced` 中支持 `terminal shell = custom` 时的自定义路径配置（未启用 custom 时显示引导说明）
+- `History` 与 `ACP subscription` Tab 保持此前能力，改为在对应专属 Tab 中展示
+- Tab 栏支持换行显示，避免窄屏下挤压
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/settings/settings-tab.ts`
+
+---
+
+## 2026-04-13 - 设置页新增“对话历史”Tab与terminal shell可配置
+
+**实现范围**:
+- 设置页结构优化（Tab 化）
+- 对话历史管理能力增强
+- terminal 工具 shell 选择策略增强
+
+**完成内容**:
+- `settings-tab` 新增顶部 Tab：`General` 与 `Conversation history`
+- 将“会话过期时间”迁移到 `Conversation history` 专属 Tab
+- 历史 Tab 新增会话列表浏览（标题、更新时间、消息数、首条内容预览）
+- 历史 Tab 新增批量操作：全选/反选、批量删除（原地二次确认）、清空历史（保留当前会话，原地二次确认）
+- 历史 Tab 新增“立即清理过期会话”按钮
+- `SessionManager` 新增 `deleteSessions`、`removeExpiredSessions`，并扩展 `clearAllSessions({ keepCurrent })`
+- terminal 工具新增可配置 shell：`auto / pwsh / powershell / cmd / bash / zsh / sh / custom`
+- terminal 执行新增自动候选回退逻辑（`ENOENT` 时尝试下一候选 shell）
+- 设置页文本数字输入改为防抖保存，避免输入时频繁触发保存流程
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/settings/settings-tab.ts`
+- `src/settings/settings.ts`
+- `src/services/session-manager.ts`
+- `src/services/tool-executor.ts`
+- `src/ui/chat-view.ts`
+- `test/unit/tool-executor.test.ts`
+
+---
+
+## 2026-04-13 - 新增本地 dev 手动发布运行操作（Codex 可直接执行）
+
+**实现范围**:
+- 本地发布流程标准化
+- 测试文档修正
+
+**完成内容**:
+- 在 `package.json` 增加 `npm run sync:dev`（仅同步）与 `npm run publish:dev`（构建+同步）脚本
+- 在 `.memory/04-testing.md` 增加 “Codex 运行操作（手动发布到 dev）” 章节
+- 修正开发 vault 步骤描述，不再使用“build 后自动复制”的不准确说法，改为显式手动发布命令
+
+**测试结果**:
+- `npm run publish:dev` 通过（包含 `build:quick` 与 `sync:dev`）
+
+**相关文件**:
+- `package.json`
+- `.memory/04-testing.md`
+
+---
+
 ## 2026-04-13 - 修复 review commit 引入的 package.json 重复键与 lockfile 版本冲突
 
 **实现范围**:

@@ -21,10 +21,27 @@ import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
 import { SessionManager } from './services/session-manager';
 import { AcpAdapterPool } from './services/acp-adapter-pool';
+import { loadStoredSettings, saveStoredSettings } from './services/plugin-data-storage';
+import {
+	createSettingsEffectFlags,
+	PluginSettingsEffects,
+	SettingsEffectFlags,
+	SettingsEffects,
+} from './settings/settings-effects';
+import { InMemorySettingsStore, SettingsPatch, SettingsStore } from './settings/settings-store';
+
+interface ApplySettingsPatchOptions {
+	rebuildAdapter?: boolean;
+	refreshView?: boolean;
+	persist?: boolean;
+	updateHistoryExpiry?: boolean;
+}
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
 	private adapter: AgentAdapter | null = null;
+	private settingsStore!: SettingsStore;
+	private settingsEffects!: SettingsEffects;
 	private readonly adapterPool = new AcpAdapterPool({
 		createAdapter: (config) => new AcpBridgeAdapter(config),
 	});
@@ -38,6 +55,8 @@ export default class AgentLinkPlugin extends Plugin {
 		// Initialize SessionManager
 		this.sessionManager = new SessionManager(this);
 		await this.sessionManager.initialize();
+		await this.sessionManager.setHistoryExpiryDays(this.settings.sessionHistoryExpiryDays);
+		this.settingsEffects = this.createSettingsEffects();
 		
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
@@ -115,7 +134,7 @@ export default class AgentLinkPlugin extends Plugin {
 	// ── Settings ───────────────────────────────────────────────────────
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
+		const loaded = await loadStoredSettings(this);
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		let settingsChanged = false;
 
@@ -161,7 +180,13 @@ export default class AgentLinkPlugin extends Plugin {
 		}
 
 		if (settingsChanged) {
-			await this.saveData(this.settings);
+			await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
+		}
+
+		if (this.settingsStore) {
+			this.settingsStore.replace(this.settings);
+		} else {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
 		}
 	}
 
@@ -204,23 +229,49 @@ export default class AgentLinkPlugin extends Plugin {
 			const registry = await fetchAcpRegistry();
 			await saveLocalAcpRegistry(this.app, registry);
 			this.settings.lastAcpRegistrySync = new Date(now).toISOString();
-			await this.saveData(this.settings);
+			await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
 			logger.info(`[AgentLink] Registry synced: ${registry.agents.length} agents available`);
 		} catch (err) {
 			console.warn('[AgentLink] Failed to fetch ACP registry from CDN:', err);
 		}
 	}
 
-	async saveSettings(): Promise<void> {
-		logger.setDebug(this.settings.enableDebugLog);
-		await this.saveData(this.settings);
-		await this.buildAdapter();
-		// Refresh the open view
-		const view = this.getChatView();
-		if (view && this.adapter) {
-			view.setAdapter(this.adapter);
-			view.refreshSettings();
+	async saveSettings(options?: { rebuildAdapter?: boolean }): Promise<void> {
+		if (!this.settingsStore) {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
 		}
+		if (!this.settingsEffects) {
+			this.settingsEffects = this.createSettingsEffects();
+		}
+		this.settingsStore.replace(this.settings);
+		this.settings = this.settingsStore.getSnapshot();
+		await this.applySettingsEffects(
+			createSettingsEffectFlags({
+				rebuildAdapter: options?.rebuildAdapter ?? true,
+			}),
+		);
+	}
+
+	async applySettingsPatch(
+		patch: SettingsPatch,
+		options?: ApplySettingsPatchOptions,
+	): Promise<void> {
+		if (!this.settingsStore) {
+			this.settingsStore = new InMemorySettingsStore(this.settings);
+		}
+		if (!this.settingsEffects) {
+			this.settingsEffects = this.createSettingsEffects();
+		}
+		const previous = this.settings;
+		const next = this.settingsStore.applyPatch(patch);
+		this.settings = next;
+		const flags = createSettingsEffectFlags({
+			persist: options?.persist,
+			rebuildAdapter: options?.rebuildAdapter ?? this.shouldRebuildAdapterForPatch(patch),
+			refreshView: options?.refreshView,
+			updateHistoryExpiry: options?.updateHistoryExpiry ?? this.shouldUpdateHistoryExpiryForPatch(previous, next, patch),
+		});
+		await this.applySettingsEffects(flags);
 	}
 
 	// ── Backend Management ─────────────────────────────────────────────
@@ -297,6 +348,49 @@ export default class AgentLinkPlugin extends Plugin {
 		const ttlMs = Math.max(0, this.settings.acpConnectionCacheTtlMinutes) * 60_000;
 		const validBackendIds = new Set(this.settings.backends.map((backend) => backend.id));
 		await this.adapterPool.evictExpired(ttlMs, this.settings.activeBackendId || null, validBackendIds);
+	}
+
+	private createSettingsEffects(): SettingsEffects {
+		return new PluginSettingsEffects({
+			persist: async (settings) => {
+				await saveStoredSettings(this, settings as unknown as Record<string, unknown>);
+			},
+			rebuildAdapter: async () => {
+				await this.buildAdapter();
+			},
+			refreshView: async ({ rebuildAdapter }) => {
+				const view = this.getChatView();
+				if (view && this.adapter) {
+					if (rebuildAdapter) {
+						view.setAdapter(this.adapter);
+					}
+					view.refreshSettings();
+				}
+			},
+			setDebug: (enabled) => logger.setDebug(enabled),
+			updateHistoryExpiry: async (days) => {
+				await this.sessionManager.setHistoryExpiryDays(days);
+			},
+		});
+	}
+
+	private async applySettingsEffects(flags: SettingsEffectFlags): Promise<void> {
+		await this.settingsEffects.apply(this.settings, flags);
+	}
+
+	private shouldRebuildAdapterForPatch(patch: SettingsPatch): boolean {
+		return patch.activeBackendId !== undefined || patch.backends !== undefined;
+	}
+
+	private shouldUpdateHistoryExpiryForPatch(
+		previous: AgentLinkSettings,
+		next: AgentLinkSettings,
+		patch: SettingsPatch,
+	): boolean {
+		if (patch.sessionHistoryExpiryDays === undefined) {
+			return false;
+		}
+		return previous.sessionHistoryExpiryDays !== next.sessionHistoryExpiryDays;
 	}
 
 	// ── View helpers ───────────────────────────────────────────────────

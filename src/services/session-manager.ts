@@ -10,6 +10,7 @@
 
 import { Plugin } from 'obsidian';
 import { ChatMessage, generateId } from '../core/types';
+import { loadStoredSessions, saveStoredSessions } from './plugin-data-storage';
 
 export interface SessionMetadata {
 	id: string;
@@ -31,13 +32,13 @@ export interface SessionData {
 	messageCount?: number;
 }
 
-const STORAGE_KEY = 'agentlink-sessions';
 const MAX_SESSIONS = 50; // Keep last 50 sessions
 
 export class SessionManager {
 	private plugin: Plugin;
 	private sessions: Map<string, SessionData> = new Map();
 	private currentSessionId: string | null = null;
+	private historyExpiryDays = 0;
 
 	constructor(plugin: Plugin) {
 		this.plugin = plugin;
@@ -45,21 +46,22 @@ export class SessionManager {
 
 	/** Initialize and load existing sessions from storage */
 	async initialize(): Promise<void> {
-		const data = await this.plugin.loadData() as Record<string, unknown> | undefined;
-		if (data && data[STORAGE_KEY]) {
-			const stored = data[STORAGE_KEY] as Record<string, SessionData>;
-			for (const [id, session] of Object.entries(stored)) {
-				this.sessions.set(id, session);
-			}
+		const stored = await loadStoredSessions<SessionData>(this.plugin);
+		for (const [id, session] of Object.entries(stored)) {
+			this.sessions.set(id, session);
 		}
-		console.log(`[SessionManager] Loaded ${this.sessions.size} sessions`);
+		const removed = await this.pruneExpiredSessions();
+		console.log(`[SessionManager] Loaded ${this.sessions.size} sessions${removed > 0 ? ` (${removed} expired removed)` : ''}`);
+	}
+
+	async setHistoryExpiryDays(days: number): Promise<void> {
+		this.historyExpiryDays = Math.max(0, Math.floor(days));
+		await this.pruneExpiredSessions();
 	}
 
 	/** Save all sessions to storage */
 	private async persist(): Promise<void> {
-		const data = (await this.plugin.loadData()) as Record<string, unknown> || {};
-		data[STORAGE_KEY] = Object.fromEntries(this.sessions);
-		await this.plugin.saveData(data);
+		await saveStoredSessions(this.plugin, Object.fromEntries(this.sessions));
 	}
 
 	/** Create a new session */
@@ -75,7 +77,7 @@ export class SessionManager {
 		};
 		this.sessions.set(id, session);
 		this.currentSessionId = id;
-		this.persist();
+		void this.persist();
 		return session;
 	}
 
@@ -149,8 +151,40 @@ export class SessionManager {
 		return deleted;
 	}
 
+	/** Delete multiple sessions in one operation. */
+	async deleteSessions(
+		sessionIds: string[],
+		options?: { allowCurrent?: boolean }
+	): Promise<{ deleted: number; skippedCurrent: number }> {
+		const allowCurrent = options?.allowCurrent ?? false;
+		const uniqueIds = new Set(sessionIds);
+		let deleted = 0;
+		let skippedCurrent = 0;
+
+		for (const sessionId of uniqueIds) {
+			if (!allowCurrent && sessionId === this.currentSessionId) {
+				skippedCurrent++;
+				continue;
+			}
+			if (this.sessions.delete(sessionId)) {
+				deleted++;
+			}
+		}
+
+		if (deleted > 0) {
+			await this.persist();
+		}
+
+		return { deleted, skippedCurrent };
+	}
+
 	/** Get all session metadata (for list view) */
 	getAllSessions(): SessionMetadata[] {
+		const removedExpired = this.pruneExpiredSessionsSync();
+		if (removedExpired > 0) {
+			void this.persist();
+		}
+
 		return Array.from(this.sessions.values())
 			.map(s => ({
 				id: s.id,
@@ -163,11 +197,27 @@ export class SessionManager {
 			.sort((a, b) => b.updatedAt - a.updatedAt); // Most recent first
 	}
 
-	/** Clear all sessions */
-	async clearAllSessions(): Promise<void> {
+	/** Clear all sessions, optionally preserving the current one. */
+	async clearAllSessions(options?: { keepCurrent?: boolean }): Promise<number> {
+		const keepCurrent = options?.keepCurrent ?? false;
+		const preservedSessionId = keepCurrent ? this.currentSessionId : null;
+
+		if (preservedSessionId && this.sessions.has(preservedSessionId)) {
+			const removed = Math.max(0, this.sessions.size - 1);
+			const preserved = this.sessions.get(preservedSessionId);
+			this.sessions.clear();
+			if (preserved) {
+				this.sessions.set(preservedSessionId, preserved);
+			}
+			await this.persist();
+			return removed;
+		}
+
+		const removed = this.sessions.size;
 		this.sessions.clear();
 		this.currentSessionId = null;
 		await this.persist();
+		return removed;
 	}
 
 	/** Generate a title from the first user message */
@@ -187,6 +237,7 @@ export class SessionManager {
 
 	/** Clean up old sessions if exceeding limit */
 	async cleanupOldSessions(): Promise<void> {
+		const removedExpired = await this.pruneExpiredSessions();
 		if (this.sessions.size > MAX_SESSIONS) {
 			const sorted = this.getAllSessions();
 			const toDelete = sorted.slice(MAX_SESSIONS);
@@ -194,7 +245,41 @@ export class SessionManager {
 				this.sessions.delete(meta.id);
 			}
 			await this.persist();
-			console.log(`[SessionManager] Cleaned up ${toDelete.length} old sessions`);
+			console.log(`[SessionManager] Cleaned up ${toDelete.length} old sessions${removedExpired > 0 ? ` (${removedExpired} expired)` : ''}`);
 		}
+	}
+
+	async removeExpiredSessions(): Promise<number> {
+		return await this.pruneExpiredSessions();
+	}
+
+	private async pruneExpiredSessions(now = Date.now()): Promise<number> {
+		const removed = this.pruneExpiredSessionsSync(now);
+		if (removed > 0) {
+			await this.persist();
+		}
+		return removed;
+	}
+
+	private pruneExpiredSessionsSync(now = Date.now()): number {
+		if (this.historyExpiryDays <= 0) {
+			return 0;
+		}
+
+		const expiryMs = this.historyExpiryDays * 24 * 60 * 60 * 1000;
+		let removed = 0;
+
+		for (const [sessionId, session] of this.sessions.entries()) {
+			if (sessionId === this.currentSessionId) {
+				continue;
+			}
+
+			if (now - session.updatedAt > expiryMs) {
+				this.sessions.delete(sessionId);
+				removed++;
+			}
+		}
+
+		return removed;
 	}
 }

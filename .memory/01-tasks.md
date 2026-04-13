@@ -72,6 +72,18 @@
 - [ ] **README.md 重写** - 反映当前 ACP 能力、缓存策略、权限与 UI 结构
 - [ ] **遗留 mock 文案清理** - 清理代码和 UI 中残留的 mock backend 文案与注释
 
+### 架构模块化 v1（新分支执行）
+
+**目标**: 在不改变用户行为的前提下完成 settings/chat/acp 的模块化分层，并建立可回退的迭代提交链路。
+
+- [x] I1 Settings 分层骨架（SettingsStore / SettingsEffects）
+- [x] I2 Settings 保存链路收敛（applySettingsPatch + effect flags）
+- [x] I3 ChatView 控制器化（Header / Toolbar）
+- [x] I4 ChatView 控制器化（Composer / Message Renderer + 会话持久化触发点）
+- [x] I5 ACP Adapter 内部重组（Transport / Mapper / SessionState）
+- [x] I6 UI 工程化收口（重复 inline style 迁移到 styles.css）
+- [x] I7 文档收口（01/02/03 memory 更新 + 验收记录）
+
 ---
 
 ### Phase 5 - Agent 命令支持（已完成）

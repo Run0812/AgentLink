@@ -24,6 +24,16 @@ export interface ToolExecutorConfig {
 	autoConfirmRead: boolean;
 	/** Auto-confirm file edits (DANGEROUS) */
 	autoConfirmEdit: boolean;
+	/** Terminal shell selection (auto picks sensible platform defaults). */
+	terminalShell: 'auto' | 'pwsh' | 'powershell' | 'cmd' | 'bash' | 'zsh' | 'sh' | 'custom';
+	/** Custom shell executable/path when terminalShell is custom. */
+	terminalShellCustomPath: string;
+}
+
+interface TerminalShellRuntime {
+	executable: string;
+	argsPrefix: string[];
+	label: string;
 }
 
 /**
@@ -315,26 +325,100 @@ export class ToolExecutor {
 
 		const workingDir = cwd || this.config.workspaceRoot;
 		const timeoutMs = timeout || 30000; // Default 30s timeout
+		const shellCandidates = this.resolveTerminalShellCandidates();
 
-		return new Promise((resolve) => {
-			const args = ['-c', command];
-			const child = spawn('bash', args, {
-				cwd: workingDir,
-				env: process.env,
+		return this.runCommandWithShellFallback({
+			command,
+			workingDir,
+			timeoutMs,
+			shellCandidates,
+		});
+	}
+
+	private async runCommandWithShellFallback(input: {
+		command: string;
+		workingDir: string;
+		timeoutMs: number;
+		shellCandidates: TerminalShellRuntime[];
+	}): Promise<ToolResult> {
+		const { command, workingDir, timeoutMs, shellCandidates } = input;
+		let attempt = 0;
+		let lastSpawnError: string | null = null;
+
+		for (const shell of shellCandidates) {
+			attempt++;
+			const result = await this.runTerminalCommandAttempt({
+				command,
+				workingDir,
+				timeoutMs,
+				shell,
 			});
 
+			const errorCode = result.metadata?.errorCode;
+			if (result.success || errorCode !== 'ENOENT') {
+				return {
+					...result,
+					metadata: {
+						...result.metadata,
+						shell: shell.label,
+						shellExecutable: shell.executable,
+						attempt,
+					},
+				};
+			}
+
+			const metadataError = typeof result.metadata?.error === 'string'
+				? result.metadata.error
+				: result.content;
+			lastSpawnError = metadataError;
+		}
+
+		return {
+			success: false,
+			content: `Failed to execute command: no available shell candidate (${lastSpawnError ?? 'unknown error'})`,
+			metadata: {
+				command,
+				error: lastSpawnError ?? 'No shell candidate available',
+				attempts: shellCandidates.map((candidate) => candidate.label),
+			},
+		};
+	}
+
+	private async runTerminalCommandAttempt(input: {
+		command: string;
+		workingDir: string;
+		timeoutMs: number;
+		shell: TerminalShellRuntime;
+	}): Promise<ToolResult> {
+		const { command, workingDir, timeoutMs, shell } = input;
+
+		return new Promise((resolve) => {
 			let stdout = '';
 			let stderr = '';
-			let killed = false;
+			let finished = false;
 
-			// Set timeout
+			const child = spawn(shell.executable, [...shell.argsPrefix, command], {
+				cwd: workingDir,
+				env: process.env,
+				shell: false,
+				stdio: ['ignore', 'pipe', 'pipe'],
+			});
+
 			const timeoutId = setTimeout(() => {
-				killed = true;
+				if (finished) {
+					return;
+				}
+				finished = true;
 				child.kill('SIGTERM');
 				resolve({
 					success: false,
 					content: `Command timed out after ${timeoutMs}ms`,
-					metadata: { command, timeout: timeoutMs, stdout, stderr },
+					metadata: {
+						command,
+						timeout: timeoutMs,
+						stdout: stdout.slice(0, 10000),
+						stderr: stderr.slice(0, 10000),
+					},
 				});
 			}, timeoutMs);
 
@@ -347,32 +431,116 @@ export class ToolExecutor {
 			});
 
 			child.on('close', (code) => {
+				if (finished) {
+					return;
+				}
+				finished = true;
 				clearTimeout(timeoutId);
-				if (killed) return;
 
 				const output = stdout + (stderr ? `\n[stderr]:\n${stderr}` : '');
 				resolve({
 					success: code === 0,
 					content: output || '(no output)',
-					metadata: { 
-						command, 
-						exitCode: code, 
-						stdout: stdout.slice(0, 10000), // Limit size
+					metadata: {
+						command,
+						exitCode: code,
+						stdout: stdout.slice(0, 10000),
 						stderr: stderr.slice(0, 10000),
 					},
 				});
 			});
 
 			child.on('error', (error) => {
+				if (finished) {
+					return;
+				}
+				finished = true;
 				clearTimeout(timeoutId);
-				if (killed) return;
-
 				resolve({
 					success: false,
 					content: `Failed to execute command: ${error.message}`,
-					metadata: { command, error: error.message },
+					metadata: { command, error: error.message, errorCode: (error as NodeJS.ErrnoException).code },
 				});
 			});
 		});
+	}
+
+	private resolveTerminalShellCandidates(): TerminalShellRuntime[] {
+		const mode = this.config.terminalShell;
+		if (mode === 'custom') {
+			const customPath = this.config.terminalShellCustomPath.trim();
+			if (!customPath) {
+				return this.getAutoShellCandidates();
+			}
+			return [this.resolveShellRuntime(customPath)];
+		}
+
+		if (mode !== 'auto') {
+			return [this.resolveShellRuntime(mode)];
+		}
+
+		return this.getAutoShellCandidates();
+	}
+
+	private getAutoShellCandidates(): TerminalShellRuntime[] {
+		const candidates: string[] = [];
+		if (process.platform === 'win32') {
+			candidates.push('pwsh', 'powershell');
+			if (process.env.ComSpec && process.env.ComSpec.trim()) {
+				candidates.push(process.env.ComSpec.trim());
+			}
+			candidates.push('cmd');
+		} else {
+			if (process.env.SHELL && process.env.SHELL.trim()) {
+				candidates.push(process.env.SHELL.trim());
+			}
+			candidates.push('bash', 'zsh', 'sh');
+		}
+
+		const seen = new Set<string>();
+		const runtimes: TerminalShellRuntime[] = [];
+		for (const candidate of candidates) {
+			const key = candidate.toLowerCase();
+			if (seen.has(key)) {
+				continue;
+			}
+			seen.add(key);
+			runtimes.push(this.resolveShellRuntime(candidate));
+		}
+
+		return runtimes;
+	}
+
+	private resolveShellRuntime(shellNameOrPath: string): TerminalShellRuntime {
+		const normalized = shellNameOrPath.trim();
+		const lower = normalized.toLowerCase();
+		const executableName = lower.replace(/^.*[\\/]/, '');
+
+		if (executableName === 'cmd' || executableName === 'cmd.exe') {
+			return {
+				executable: normalized,
+				argsPrefix: ['/d', '/s', '/c'],
+				label: 'cmd',
+			};
+		}
+
+		if (
+			executableName === 'pwsh'
+			|| executableName === 'pwsh.exe'
+			|| executableName === 'powershell'
+			|| executableName === 'powershell.exe'
+		) {
+			return {
+				executable: normalized,
+				argsPrefix: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command'],
+				label: executableName.includes('pwsh') ? 'pwsh' : 'powershell',
+			};
+		}
+
+		return {
+			executable: normalized,
+			argsPrefix: ['-lc'],
+			label: executableName || normalized,
+		};
 	}
 }
