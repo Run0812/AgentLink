@@ -10,7 +10,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
 	private editingBackendId: string | null = null;
 	private delayedSaveHandle: ReturnType<typeof setTimeout> | null = null;
-	private activeTab: 'general' | 'history' = 'general';
+	private activeTab: 'agent' | 'agent-advanced' | 'history' | 'acp-subscription' = 'agent';
 	private selectedHistorySessionIds = new Set<string>();
 	private pendingSingleDeleteSessionId: string | null = null;
 	private pendingBulkDelete = false;
@@ -51,7 +51,11 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		return parsed;
 	}
 
-	private createSettingsTabButton(container: HTMLElement, label: string, tab: 'general' | 'history'): HTMLButtonElement {
+	private createSettingsTabButton(
+		container: HTMLElement,
+		label: string,
+		tab: 'agent' | 'agent-advanced' | 'history' | 'acp-subscription'
+	): HTMLButtonElement {
 		const button = container.createEl('button', { text: label });
 		const isActive = this.activeTab === tab;
 		button.style.border = '1px solid var(--background-modifier-border)';
@@ -82,37 +86,54 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 		const tabBar = containerEl.createDiv();
 		tabBar.style.display = 'flex';
+		tabBar.style.flexWrap = 'wrap';
 		tabBar.style.gap = '0.5em';
 		tabBar.style.marginBottom = '1em';
 		tabBar.style.paddingBottom = '0.75em';
 		tabBar.style.borderBottom = '1px solid var(--background-modifier-border)';
-		this.createSettingsTabButton(tabBar, 'General', 'general');
-		this.createSettingsTabButton(tabBar, 'Conversation history', 'history');
+		this.createSettingsTabButton(tabBar, 'Agent', 'agent');
+		this.createSettingsTabButton(tabBar, 'Agent advanced', 'agent-advanced');
+		this.createSettingsTabButton(tabBar, 'History', 'history');
+		this.createSettingsTabButton(tabBar, 'ACP subscription', 'acp-subscription');
 
 		const contentEl = containerEl.createDiv();
-		if (this.activeTab === 'history') {
-			this.renderConversationHistoryTab(contentEl);
-			return;
+		switch (this.activeTab) {
+			case 'agent':
+				this.renderAgentTab(contentEl);
+				return;
+			case 'agent-advanced':
+				this.renderAgentAdvancedTab(contentEl);
+				return;
+			case 'history':
+				this.renderConversationHistoryTab(contentEl);
+				return;
+			case 'acp-subscription':
+				this.renderAcpSubscriptionTab(contentEl);
+				return;
+			default:
+				this.renderAgentTab(contentEl);
 		}
-
-		// Backend Management Section
-		this.renderBackendManagement(contentEl);
-
-		// ACP Registry Settings Section
-		contentEl.createEl('h3', { text: 'ACP Registry' });
-		this.renderRegistrySettings(contentEl);
-
-		// Global Settings Section
-		contentEl.createEl('h3', { text: 'Global Settings' });
-		this.renderGlobalSettings(contentEl);
-
-		// Tool Call Settings Section
-		contentEl.createEl('h3', { text: 'Tool Call Settings' });
-		this.renderToolCallSettings(contentEl);
 	}
 
-	// ── Backend Management ───────────────────────────────────────────────
+	private renderAgentTab(containerEl: HTMLElement): void {
+		this.renderBackendManagement(containerEl);
+		containerEl.createEl('h3', { text: 'Agent options' });
+		this.renderGlobalSettings(containerEl);
+	}
 
+	private renderAgentAdvancedTab(containerEl: HTMLElement): void {
+		containerEl.createEl('h3', { text: 'Agent advanced' });
+		this.renderAgentAdvancedSettings(containerEl);
+		containerEl.createEl('h3', { text: 'Tool safety' });
+		this.renderToolCallSettings(containerEl);
+	}
+
+	private renderAcpSubscriptionTab(containerEl: HTMLElement): void {
+		containerEl.createEl('h3', { text: 'ACP subscription' });
+		this.renderRegistrySettings(containerEl);
+	}
+
+	// 岸岸 Backend Management 岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸岸
 	private renderBackendManagement(containerEl: HTMLElement): void {
 		containerEl.createEl('h3', { text: 'Agent Backends' });
 
@@ -522,20 +543,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName('System Prompt')
-			.setDesc('A system-level instruction sent to agents.')
-			.addTextArea((ta) => {
-				ta.setValue(this.plugin.settings.systemPrompt)
-					.setPlaceholder('You are a helpful AI assistant…')
-					.onChange((v) => {
-						this.plugin.settings.systemPrompt = v;
-						this.scheduleSettingsSave({ rebuildAdapter: false });
-					});
-				ta.inputEl.rows = 3;
-				ta.inputEl.style.width = '100%';
-			});
-
-		new Setting(containerEl)
 			.setName('Auto-reconnect')
 			.setDesc('Automatically reconnect when the backend connection is lost.')
 			.addToggle(
@@ -544,6 +551,41 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					await this.saveSettingsNoRebuild();
 				})
 			);
+
+		new Setting(containerEl)
+			.setName('Terminal shell')
+			.setDesc('Shell used by terminal tool calls. Use "Custom executable/path" for a manual shell path.')
+			.addDropdown((dropdown) => {
+				dropdown.addOption('auto', 'Auto (recommended)');
+				dropdown.addOption('pwsh', 'PowerShell 7 (pwsh)');
+				dropdown.addOption('powershell', 'Windows PowerShell');
+				dropdown.addOption('cmd', 'Command Prompt (cmd)');
+				dropdown.addOption('bash', 'Bash');
+				dropdown.addOption('zsh', 'Zsh');
+				dropdown.addOption('sh', 'POSIX sh');
+				dropdown.addOption('custom', 'Custom executable/path');
+				dropdown.setValue(this.plugin.settings.terminalShell);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.terminalShell = value as TerminalShellOption;
+					await this.saveSettingsNoRebuild();
+				});
+			});
+	}
+
+	private renderAgentAdvancedSettings(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName('System Prompt')
+			.setDesc('A system-level instruction sent to agents.')
+			.addTextArea((ta) => {
+				ta.setValue(this.plugin.settings.systemPrompt)
+					.setPlaceholder('You are a helpful AI assistant.')
+					.onChange((v) => {
+						this.plugin.settings.systemPrompt = v;
+						this.scheduleSettingsSave({ rebuildAdapter: false });
+					});
+				ta.inputEl.rows = 3;
+				ta.inputEl.style.width = '100%';
+			});
 
 		new Setting(containerEl)
 			.setName('Enable Debug Log')
@@ -571,30 +613,6 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					this.scheduleNoRebuildSave();
 				});
 			});
-	}
-
-	// ── Tool Call Settings ───────────────────────────────────────────────
-
-	private renderToolCallSettings(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName('Terminal shell')
-			.setDesc('Shell used by terminal tool calls. Auto will choose a sensible default for your platform.')
-			.addDropdown((dropdown) => {
-				dropdown.addOption('auto', 'Auto (recommended)');
-				dropdown.addOption('pwsh', 'PowerShell 7 (pwsh)');
-				dropdown.addOption('powershell', 'Windows PowerShell');
-				dropdown.addOption('cmd', 'Command Prompt (cmd)');
-				dropdown.addOption('bash', 'Bash');
-				dropdown.addOption('zsh', 'Zsh');
-				dropdown.addOption('sh', 'POSIX sh');
-				dropdown.addOption('custom', 'Custom executable/path');
-				dropdown.setValue(this.plugin.settings.terminalShell);
-				dropdown.onChange(async (value) => {
-					this.plugin.settings.terminalShell = value as TerminalShellOption;
-					await this.saveSettingsNoRebuild();
-					this.display();
-				});
-			});
 
 		if (this.plugin.settings.terminalShell === 'custom') {
 			new Setting(containerEl)
@@ -608,8 +626,15 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 						this.scheduleNoRebuildSave();
 					});
 				});
+		} else {
+			new Setting(containerEl)
+				.setName('Custom terminal shell path')
+				.setDesc('Set terminal shell to "Custom executable/path" on Agent tab to edit this field.')
+				.setDisabled(true);
 		}
+	}
 
+	private renderToolCallSettings(containerEl: HTMLElement): void {
 		new Setting(containerEl)
 			.setName('Auto-confirm Read Operations')
 			.setDesc('Automatically confirm read-only operations (read_file, list_dir, search).')
@@ -622,7 +647,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Auto-confirm File Edits')
-			.setDesc('⚠️ DANGER: Automatically confirm file modifications without review!')
+			.setDesc('DANGER: Automatically confirm file modifications without review!')
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.autoConfirmEdit).onChange(async (v) => {
 					this.plugin.settings.autoConfirmEdit = v;
@@ -1021,3 +1046,4 @@ class AddBackendModal extends Modal {
 		contentEl.empty();
 	}
 }
+

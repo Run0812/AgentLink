@@ -9,6 +9,29 @@
 
 ---
 
+## 2026-04-13 - 设置页改为四分 Tab（Agent / Agent advanced / History / ACP subscription）
+
+**实现范围**:
+- 设置页信息架构重组
+- 首页保留高频 Agent 配置
+
+**完成内容**:
+- 顶部 Tab 调整为 4 个：`Agent`、`Agent advanced`、`History`、`ACP subscription`
+- `Agent` Tab 保留高频项：Backend 管理、Request Timeout、Auto-reconnect、Terminal shell 选择
+- `Agent advanced` Tab 聚合低频高级项：System Prompt、Debug Log、ACP connection cache TTL、Tool safety 选项
+- `Agent advanced` 中支持 `terminal shell = custom` 时的自定义路径配置（未启用 custom 时显示引导说明）
+- `History` 与 `ACP subscription` Tab 保持此前能力，改为在对应专属 Tab 中展示
+- Tab 栏支持换行显示，避免窄屏下挤压
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/settings/settings-tab.ts`
+
+---
+
 ## 2026-04-13 - 设置页新增“对话历史”Tab与terminal shell可配置
 
 **实现范围**:
