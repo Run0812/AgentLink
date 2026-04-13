@@ -9,6 +9,32 @@
 
 ---
 
+## 2026-04-13 - 架构模块化 I3：ChatView Header/Toolbar 控制器化
+
+**实现范围**:
+- ChatView 的 header/history 与底部 toolbar 下拉逻辑解耦
+- 会话删除与切换行为保持不变
+
+**完成内容**:
+- 新增 `HeaderSessionController`，承接会话历史下拉与历史列表 modal 渲染
+- 新增 `ToolbarController`，承接 Agent/Model/Thinking 下拉渲染
+- `chat-view` 中 `openSessionList`、`renderHistoryDropdown`、`renderAgentDropdown`、`renderModelDropdown`、`renderThinkingDropdown` 改为控制器委托
+- `chat-view` 新增 `switchBackend` / `handleThinkingModeChange` / `deleteSession`，集中处理副作用与状态更新
+- 历史下拉删除按钮保持“原地二次确认”交互（`Delete -> Confirm`）
+- `01-tasks.md` 标记 I3 完成
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test -- test/unit/settings.test.ts test/unit/tool-executor.test.ts` 通过（17 tests）
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `src/ui/controllers/header-session-controller.ts`
+- `src/ui/controllers/toolbar-controller.ts`
+- `.memory/01-tasks.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I2：Settings 保存链路收敛与 effect flag 规则
 
 **实现范围**:

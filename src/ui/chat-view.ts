@@ -18,11 +18,13 @@ import { logger } from '../core/logger';
 import { SessionStore } from '../services/session-store';
 import { ToolExecutor, ToolExecutorConfig } from '../services/tool-executor';
 import { AgentLinkSettings, getBackendTypeLabel, getActiveBackendConfig } from '../settings/settings';
-import { SessionManager, SessionMetadata } from '../services/session-manager';
+import { SessionManager } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
 import { InputAutocomplete, createSlashCommandSuggestions, createAvailableCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger, buildAgentSlashCommandText } from './components/input-autocomplete';
 import { parseBuiltinSlashCommandPrompt } from './slash-command-utils';
 import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
+import { ToolbarController } from './controllers/toolbar-controller';
+import { HeaderSessionController } from './controllers/header-session-controller';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -39,6 +41,8 @@ export class ChatView extends ItemView {
 	private sessionManager: SessionManager;
 	private currentSessionId: string | null = null;
 	private contextService: ContextService;
+	private toolbarController: ToolbarController;
+	private headerSessionController: HeaderSessionController;
 
 	// Maximum number of recent messages to include as conversation context
 	private static readonly MAX_CONTEXT_MESSAGES = 20;
@@ -127,6 +131,30 @@ export class ChatView extends ItemView {
 		};
 		this.toolExecutor = new ToolExecutor(this.app, toolConfig);
 		this.contextService = new ContextService(this.app.vault);
+
+		this.toolbarController = new ToolbarController({
+			getSettings: () => this.settings,
+			getAdapter: () => this.adapter,
+			getModelConfigOption: () => this.getModelConfigOption(),
+			applyToolbarDropdownStyle: (container, align, maxHeight) =>
+				this.applyToolbarDropdownStyle(container, align, maxHeight),
+			applyToolbarDropdownHeaderStyle: (header) => this.applyToolbarDropdownHeaderStyle(header),
+			applyToolbarDropdownItemStyle: (item) => this.applyToolbarDropdownItemStyle(item),
+			applySingleLineEllipsis: (element, fontSize, color) => this.applySingleLineEllipsis(element, fontSize, color),
+			renderBackendIcon: (container, iconValue, fallbackIcon) => this.renderBackendIcon(container, iconValue, fallbackIcon),
+			onSwitchBackend: async (backendId) => this.switchBackend(backendId),
+			onConfigOptionChange: async (configId, value) => this.handleConfigOptionChange(configId, value),
+			onThinkingModeChange: async (mode) => this.handleThinkingModeChange(mode),
+		});
+
+		this.headerSessionController = new HeaderSessionController({
+			app: this.app,
+			sessionManager: this.sessionManager,
+			getCurrentSessionId: () => this.currentSessionId,
+			loadSession: (sessionId) => this.loadSession(sessionId),
+			createNewSession: () => this.createNewSession(),
+			deleteSession: async (sessionId) => this.deleteSession(sessionId),
+		});
 	}
 
 	getViewType(): string {
@@ -1892,435 +1920,46 @@ export class ChatView extends ItemView {
 
 	/** Open session list modal */
 	private openSessionList(): void {
-		const modal = new Modal(this.app);
-		modal.titleEl.setText('Chat History');
-		modal.contentEl.addClass('agentlink-session-list-modal');
-		
-		const sessions = this.sessionManager.getAllSessions();
-		
-		if (sessions.length === 0) {
-			modal.contentEl.createEl('p', { 
-				text: 'No chat history yet.',
-				cls: 'agentlink-empty-state'
-			});
-		} else {
-			const listContainer = modal.contentEl.createDiv({ cls: 'agentlink-session-list' });
-			
-			for (const session of sessions) {
-				this.renderSessionListItem(listContainer, session, modal);
-			}
+		this.headerSessionController.openSessionList();
+	}
+
+	private async switchBackend(backendId: string): Promise<void> {
+		this.settings.activeBackendId = backendId;
+		this.updateLedState('connecting');
+		await this.onSettingsSave();
+		this.refreshStatus();
+	}
+
+	private async handleThinkingModeChange(mode: 'none' | 'quick' | 'balanced' | 'deep'): Promise<void> {
+		this.settings.thinkingMode = mode;
+		await this.onSettingsSave();
+	}
+
+	private async deleteSession(sessionId: string): Promise<void> {
+		await this.sessionManager.deleteSession(sessionId);
+		if (sessionId === this.currentSessionId) {
+			this.createNewSession();
 		}
-		
-		// Add "New Chat" button at bottom
-		const footer = modal.contentEl.createDiv({ cls: 'agentlink-modal-footer' });
-		footer.style.marginTop = '1em';
-		footer.style.paddingTop = '1em';
-		footer.style.borderTop = '1px solid var(--background-modifier-border)';
-		
-		new ButtonComponent(footer)
-			.setButtonText('+ New Chat')
-			.setCta()
-			.onClick(() => {
-				modal.close();
-				this.createNewSession();
-			});
-		
-		modal.open();
 	}
 
 	/** Render Agent selector dropdown */
 	private renderAgentDropdown(container: HTMLElement): void {
-		const backends = this.settings.backends.filter(b => b.enabled !== false);
-		const activeBackend = getActiveBackendConfig(this.settings);
-
-		container.empty();
-		this.applyToolbarDropdownStyle(container, 'left', '300px');
-
-		const header = container.createEl('div', { text: 'Select Agent' });
-		this.applyToolbarDropdownHeaderStyle(header);
-
-		// Show message if no enabled backends
-		if (backends.length === 0) {
-			const emptyMsg = container.createEl('div', { text: 'No enabled agents. Enable agents in settings.' });
-			emptyMsg.style.padding = '0.5rem';
-			emptyMsg.style.color = 'var(--text-muted)';
-			emptyMsg.style.fontSize = '0.75rem';
-			emptyMsg.style.textAlign = 'center';
-			return;
-		}
-
-		for (const backend of backends) {
-			const item = container.createEl('button');
-			item.type = 'button';
-			item.style.width = '100%';
-			item.style.display = 'flex';
-			item.style.alignItems = 'center';
-			item.style.gap = '0.3rem';
-			item.style.padding = '0.35rem 0.4rem';
-			item.style.marginBottom = '0.1rem';
-			item.style.border = 'none';
-			item.style.borderRadius = '4px';
-			item.style.background = backend.id === activeBackend?.id
-				? 'var(--background-modifier-hover)'
-				: 'transparent';
-			item.style.color = 'var(--text-normal)';
-			item.style.textAlign = 'left';
-			item.style.cursor = 'pointer';
-			this.applyToolbarDropdownItemStyle(item);
-
-			const icon = item.createEl('span');
-			icon.style.width = '14px';
-			icon.style.height = '14px';
-			icon.style.display = 'inline-flex';
-			icon.style.alignItems = 'center';
-			icon.style.justifyContent = 'center';
-			icon.style.flexShrink = '0';
-			this.renderBackendIcon(icon, backend.icon);
-
-			const name = item.createEl('span', { text: backend.name });
-			name.style.flex = '1';
-			this.applySingleLineEllipsis(name, '0.75rem');
-
-			if (backend.id === activeBackend?.id) {
-				const check = item.createEl('span');
-				check.innerHTML = '✓';
-				check.style.color = 'var(--interactive-accent)';
-				check.style.fontWeight = 'bold';
-				check.style.fontSize = '0.75rem';
-				check.style.flexShrink = '0';
-			}
-
-			item.addEventListener('click', async () => {
-				if (backend.id !== this.settings.activeBackendId) {
-					// Update settings
-					this.settings.activeBackendId = backend.id;
-					this.updateLedState('connecting');
-					await this.onSettingsSave();
-					this.refreshStatus();
-					new Notice(`Switched to ${backend.name}`);
-				}
-				container.style.display = 'none';
-			});
-		}
+		this.toolbarController.renderAgentDropdown(container);
 	}
 
 	/** Render Model selector dropdown */
 	private renderModelDropdown(container: HTMLElement): void {
-		const modelOption = this.getModelConfigOption();
-		if (!modelOption || modelOption.type !== 'select' || modelOption.options.length <= 1) {
-			container.style.display = 'none';
-			return;
-		}
-
-		container.empty();
-		this.applyToolbarDropdownStyle(container);
-
-		const header = container.createEl('div', { text: 'Model' });
-		this.applyToolbarDropdownHeaderStyle(header);
-
-		for (const model of modelOption.options) {
-			const item = container.createEl('button');
-			item.type = 'button';
-			item.style.width = '100%';
-			item.style.display = 'flex';
-			item.style.flexDirection = 'column';
-			item.style.alignItems = 'stretch';
-			item.style.gap = '0.12rem';
-			item.style.minHeight = '40px';
-			item.style.padding = '0.38rem 0.4rem';
-			item.style.marginBottom = '0.1rem';
-			item.style.border = 'none';
-			item.style.borderRadius = '4px';
-			item.style.background = model.value === modelOption.currentValue
-				? 'var(--background-modifier-hover)'
-				: 'transparent';
-			item.style.color = 'var(--text-normal)';
-			item.style.textAlign = 'left';
-			item.style.cursor = 'pointer';
-			this.applyToolbarDropdownItemStyle(item);
-
-			const name = item.createEl('div', { text: model.name });
-			name.style.fontWeight = '600';
-			this.applySingleLineEllipsis(name, '0.75rem');
-
-			const desc = item.createEl('div', { text: model.description ?? '' });
-			this.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
-
-			item.addEventListener('click', async () => {
-				await this.handleConfigOptionChange(modelOption.id, model.value);
-				container.style.display = 'none';
-			});
-		}
+		this.toolbarController.renderModelDropdown(container);
 	}
 
 	/** Render Thinking intensity dropdown */
 	private renderThinkingDropdown(container: HTMLElement, triggerBtn: HTMLButtonElement): void {
-		const modes: { id: 'none' | 'quick' | 'balanced' | 'deep'; name: string; desc: string }[] = [
-			{ id: 'none', name: 'None', desc: 'No thinking process' },
-			{ id: 'quick', name: 'Quick', desc: 'Fast responses' },
-			{ id: 'balanced', name: 'Balanced', desc: 'Default mode' },
-			{ id: 'deep', name: 'Deep', desc: 'Deep analysis' },
-		];
-
-		container.empty();
-		this.applyToolbarDropdownStyle(container, 'right');
-
-		const header = container.createEl('div', { text: 'Thinking' });
-		this.applyToolbarDropdownHeaderStyle(header);
-
-		for (const mode of modes) {
-			const item = container.createEl('button');
-			item.type = 'button';
-			item.style.width = '100%';
-			item.style.display = 'flex';
-			item.style.flexDirection = 'column';
-			item.style.alignItems = 'stretch';
-			item.style.gap = '0.12rem';
-			item.style.minHeight = '40px';
-			item.style.padding = '0.38rem 0.4rem';
-			item.style.marginBottom = '0.1rem';
-			item.style.border = 'none';
-			item.style.borderRadius = '4px';
-			item.style.background = mode.id === this.settings.thinkingMode
-				? 'var(--background-modifier-hover)'
-				: 'transparent';
-			item.style.color = 'var(--text-normal)';
-			item.style.textAlign = 'left';
-			item.style.cursor = 'pointer';
-			this.applyToolbarDropdownItemStyle(item);
-
-			const nameRow = item.createEl('div');
-			nameRow.style.display = 'flex';
-			nameRow.style.alignItems = 'center';
-			nameRow.style.gap = '0.3rem';
-			nameRow.style.width = '100%';
-
-			const name = nameRow.createEl('span', { text: mode.name });
-			name.style.fontWeight = '600';
-			name.style.flex = '1';
-			this.applySingleLineEllipsis(name, '0.75rem');
-
-			if (mode.id === this.settings.thinkingMode) {
-				const check = nameRow.createEl('span');
-				check.innerHTML = '✓';
-				check.style.color = 'var(--interactive-accent)';
-				check.style.fontWeight = 'bold';
-				check.style.fontSize = '0.75rem';
-				check.style.flexShrink = '0';
-			}
-
-			const desc = item.createEl('div', { text: mode.desc });
-			this.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
-
-			item.addEventListener('click', async () => {
-				this.settings.thinkingMode = mode.id;
-				await this.onSettingsSave();
-				// Update button appearance
-				triggerBtn.innerHTML = `💭 ${mode.name} ▾`;
-				triggerBtn.style.background = mode.id !== 'none' ? 'var(--interactive-accent)' : 'transparent';
-				triggerBtn.style.color = mode.id !== 'none' ? 'var(--text-on-accent)' : 'var(--text-muted)';
-				container.style.display = 'none';
-			});
-		}
+		this.toolbarController.renderThinkingDropdown(container, triggerBtn);
 	}
 
 	/** Render inline history dropdown */
 	private renderHistoryDropdown(container: HTMLElement): void {
-		const sessions = this.sessionManager.getAllSessions();
-
-		container.empty();
-		container.style.display = 'block';
-		container.style.position = 'absolute';
-		container.style.top = '100%';
-		container.style.right = '0';
-		container.style.zIndex = '1000';
-		container.style.minWidth = '280px';
-		container.style.maxWidth = '360px';
-		container.style.maxHeight = '320px';
-		container.style.overflowY = 'auto';
-		container.style.padding = '0.4rem';
-		container.style.background = 'var(--background-primary)';
-		container.style.border = '1px solid var(--background-modifier-border)';
-		container.style.borderRadius = '8px';
-		container.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
-
-		const header = container.createEl('div', { text: 'Chat History' });
-		header.style.fontSize = '0.75rem';
-		header.style.color = 'var(--text-muted)';
-		header.style.padding = '0.3rem 0.5rem';
-		header.style.marginBottom = '0.3rem';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
-
-		if (sessions.length === 0) {
-			const empty = container.createEl('div', { text: 'No history' });
-			empty.style.padding = '0.75rem';
-			empty.style.color = 'var(--text-muted)';
-			empty.style.fontSize = '0.9rem';
-			return;
-		}
-
-		for (const session of sessions) {
-			const item = container.createDiv();
-			item.style.display = 'flex';
-			item.style.alignItems = 'center';
-			item.style.gap = '0.4rem';
-			item.style.padding = '0.4rem';
-			item.style.marginBottom = '0.25rem';
-			item.style.border = `1px solid ${session.id === this.currentSessionId ? 'var(--interactive-accent)' : 'var(--background-modifier-border)'}`;
-			item.style.borderRadius = '6px';
-			item.style.background = session.id === this.currentSessionId
-				? 'var(--background-modifier-hover)'
-				: 'transparent';
-			item.style.cursor = 'pointer';
-
-			const info = item.createDiv();
-			info.style.flex = '1';
-			info.style.minWidth = '0';
-
-			const title = info.createEl('div', { text: session.title });
-			title.style.fontWeight = '600';
-			title.style.fontSize = '0.85rem';
-			title.style.marginBottom = '0.1rem';
-			title.style.whiteSpace = 'nowrap';
-			title.style.overflow = 'hidden';
-			title.style.textOverflow = 'ellipsis';
-
-			const date = new Date(session.updatedAt).toLocaleString();
-			const meta = info.createEl('div', {
-				text: `${date} - ${session.messageCount} messages`,
-			});
-			meta.style.fontSize = '0.75rem';
-			meta.style.color = 'var(--text-muted)';
-
-			info.addEventListener('click', () => {
-				this.loadSession(session.id);
-				container.style.display = 'none';
-			});
-
-			const deleteBtn = item.createEl('button');
-			deleteBtn.style.padding = '0.2rem 0.4rem';
-			deleteBtn.style.border = 'none';
-			deleteBtn.style.borderRadius = '4px';
-			deleteBtn.style.cursor = 'pointer';
-			deleteBtn.style.fontSize = '0.8rem';
-
-			let deleteArmed = false;
-			let deleteArmedTimer: ReturnType<typeof setTimeout> | null = null;
-			const setDeleteState = (armed: boolean): void => {
-				deleteArmed = armed;
-				if (armed) {
-					deleteBtn.textContent = 'Confirm';
-					deleteBtn.style.opacity = '1';
-					deleteBtn.style.background = 'var(--background-modifier-error)';
-					deleteBtn.style.color = 'var(--text-on-accent)';
-					return;
-				}
-
-				deleteBtn.textContent = 'Delete';
-				deleteBtn.style.opacity = '0.65';
-				deleteBtn.style.background = 'transparent';
-				deleteBtn.style.color = 'var(--text-muted)';
-			};
-
-			setDeleteState(false);
-
-			deleteBtn.addEventListener('click', async (e) => {
-				e.stopPropagation();
-				if (!deleteArmed) {
-					setDeleteState(true);
-					if (deleteArmedTimer !== null) {
-						clearTimeout(deleteArmedTimer);
-					}
-					deleteArmedTimer = setTimeout(() => {
-						deleteArmedTimer = null;
-						setDeleteState(false);
-					}, 2500);
-					return;
-				}
-
-				if (deleteArmedTimer !== null) {
-					clearTimeout(deleteArmedTimer);
-					deleteArmedTimer = null;
-				}
-
-				await this.sessionManager.deleteSession(session.id);
-				if (session.id === this.currentSessionId) {
-					this.createNewSession();
-				}
-				this.renderHistoryDropdown(container);
-				new Notice('Session deleted');
-			});
-		}
-	}
-
-	/** Render a session list item */
-	private renderSessionListItem(
-		container: HTMLElement,
-		session: SessionMetadata,
-		modal: Modal
-	): void {
-		const item = container.createDiv({
-			cls: `agentlink-session-item ${session.id === this.currentSessionId ? 'is-active' : ''}`
-		});
-
-		const info = item.createDiv({ cls: 'agentlink-session-item-info' });
-		info.createEl('div', {
-			text: session.title,
-			cls: 'agentlink-session-item-title'
-		});
-
-		const date = new Date(session.updatedAt).toLocaleString();
-		info.createEl('div', {
-			text: `${date} - ${session.messageCount} messages`,
-			cls: 'agentlink-session-item-meta'
-		});
-
-		const actions = item.createDiv({ cls: 'agentlink-session-item-actions' });
-
-		new ButtonComponent(actions)
-			.setButtonText(session.id === this.currentSessionId ? 'Current' : 'Load')
-			.setDisabled(session.id === this.currentSessionId)
-			.onClick(() => {
-				modal.close();
-				this.loadSession(session.id);
-				new Notice('Session loaded');
-			});
-
-		const deleteBtn = new ButtonComponent(actions)
-			.setButtonText('Delete')
-			.setWarning();
-		let deleteArmed = false;
-		let deleteArmedTimer: ReturnType<typeof setTimeout> | null = null;
-		const setDeleteState = (armed: boolean): void => {
-			deleteArmed = armed;
-			deleteBtn.setButtonText(armed ? 'Confirm' : 'Delete');
-		};
-
-		deleteBtn.onClick(async () => {
-			if (!deleteArmed) {
-				setDeleteState(true);
-				if (deleteArmedTimer !== null) {
-					clearTimeout(deleteArmedTimer);
-				}
-				deleteArmedTimer = setTimeout(() => {
-					deleteArmedTimer = null;
-					setDeleteState(false);
-				}, 2500);
-				return;
-			}
-
-			if (deleteArmedTimer !== null) {
-				clearTimeout(deleteArmedTimer);
-				deleteArmedTimer = null;
-			}
-
-			await this.sessionManager.deleteSession(session.id);
-			if (session.id === this.currentSessionId) {
-				this.createNewSession();
-			}
-			item.remove();
-			new Notice('Session deleted');
-		});
+		this.headerSessionController.renderHistoryDropdown(container);
 	}
 
 	/** Save current session */
@@ -3124,4 +2763,5 @@ export class ChatView extends ItemView {
 		}
 	}
 }
+
 
