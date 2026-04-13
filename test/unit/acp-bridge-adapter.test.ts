@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from '../../src/adapters/acp-bridge-adapter';
 
@@ -65,12 +68,15 @@ describe('AcpBridgeAdapter', () => {
 
 	describe('ACP session state', () => {
 		it('uses Obsidian vault base path as working directory when available', () => {
+			const vaultBasePath = resolve(tmpdir(), 'agentlink-test-vault-root');
+			const expectedFileUri = pathToFileURL(resolve(vaultBasePath, 'current.md')).toString();
+
 			const adapterWithApp = new AcpBridgeAdapter({
 				...defaultConfig,
 				app: {
 					vault: {
 						adapter: {
-							getBasePath: () => 'D:\\vault-root',
+							getBasePath: () => vaultBasePath,
 						},
 					},
 				} as never,
@@ -81,8 +87,8 @@ describe('AcpBridgeAdapter', () => {
 				buildWorkspaceFileUri: (relativePath: string) => string;
 			};
 
-			expect(internal.getWorkingDirectory()).toBe('D:\\vault-root');
-			expect(internal.buildWorkspaceFileUri('current.md')).toBe('file:///D:/vault-root/current.md');
+			expect(internal.getWorkingDirectory()).toBe(vaultBasePath);
+			expect(internal.buildWorkspaceFileUri('current.md')).toBe(expectedFileUri);
 		});
 
 		it('falls back to process cwd when vault base path is unavailable', () => {

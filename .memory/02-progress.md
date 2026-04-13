@@ -9,6 +9,120 @@
 
 ---
 
+## 2026-04-13 - 测试去除硬编码绝对路径，改为动态路径构造
+
+**实现范围**:
+- 单元测试稳定性（跨平台）
+
+**完成内容**:
+- `vault-paths` 相关测试改为使用 `tmpdir()` + `resolve()` 动态构造 vault 根目录和绝对文件路径，不再硬编码 `D:\\...`
+- `AcpBridgeAdapter` 的 workspace URI 测试改为基于动态路径生成 `expectedFileUri`，避免固定盘符路径断言
+- 保持原始语义不变：仍校验 vault 内绝对路径映射、vault 外路径拒绝、以及 workspace URI 生成逻辑
+
+**测试结果**:
+- `npm run lint` 通过
+- `vitest` 在当前本机环境仍受 `spawn EPERM` 限制，需在 CI 完整验证
+
+**相关文件**:
+- `test/unit/vault-paths.test.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+
+---
+
+## 2026-04-13 - 修复 Windows 绝对路径在 Linux runner 下的路径归一化问题
+
+**实现范围**:
+- Vault 路径解析
+- ACP workspace file URI 生成
+
+**完成内容**:
+- 重写 `vault-paths` 的绝对路径判定与归一化逻辑，避免在 Linux 环境把 `D:\\...` 误当相对路径
+- `resolveVaultRelativePath()` 现在可稳定处理：
+  - `D:\\vault\\...` 与 `/D:/vault/...` 这类 Windows 绝对路径
+  - 相对路径
+  - 越出 vault 的路径拒绝（含 `..`）
+- 新增 `buildWorkspaceFileUri(basePath, relativePath)` 工具函数，统一生成跨平台可预期的 `file:///...` URI
+- `AcpBridgeAdapter.buildWorkspaceFileUri()` 改为复用上述工具函数，修复 `file:///home/.../D:%5C...` 这类错误 URI
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm run test -- test/unit/vault-paths.test.ts test/unit/acp-bridge-adapter.test.ts` 在当前环境受 `spawn EPERM` 限制，无法本地执行（需在 CI 验证）
+
+**相关文件**:
+- `src/services/vault-paths.ts`
+- `src/adapters/acp-bridge-adapter.ts`
+
+---
+
+## 2026-04-13 - 本地构建链路校验与缺失构建依赖修复
+
+**实现范围**:
+- 本地构建验证
+- 构建依赖修复
+
+**完成内容**:
+- 执行 `npm run build`，确认 lint 通过，但测试阶段在当前环境触发 `spawn EPERM`（环境权限问题）
+- 执行 `npm run build:quick` 时发现缺少 `builtin-modules` 依赖
+- 将 `builtin-modules` 补回 `devDependencies` 并更新 lockfile
+- 复跑 `npm run build:quick` 通过，构建产物正常输出到 `build/`
+
+**测试结果**:
+- `npm run build`（失败，`vitest` 启动阶段 `spawn EPERM`）
+- `npm run build:quick`（通过）
+
+**相关文件**:
+- `package.json`
+- `package-lock.json`
+
+---
+
+## 2026-04-13 - 修复 CI 中 Obsidian 类型缺失导致的大量 TypeScript 报错
+
+**实现范围**:
+- 依赖恢复与 lockfile 同步
+- CI 类型检查回归验证
+
+**完成内容**:
+- 将 `obsidian` 恢复到 `devDependencies`，修复 `Cannot find module 'obsidian'` 根因
+- 重新生成 `package-lock.json`，确保依赖与锁文件一致
+- 本地执行 `npm run lint` 验证通过，确认此前连锁的 `Plugin/Modal/View` 相关类型错误已消失
+
+**测试结果**:
+- `npm run lint` 通过
+
+**相关文件**:
+- `package.json`
+- `package-lock.json`
+
+---
+
+## 2026-04-13 - 修复 GitHub CI 的 Node 引擎不匹配与 lockfile 不同步
+
+**实现范围**:
+- GitHub Actions Node 版本升级
+- npm lockfile 稳定化
+
+**完成内容**:
+- 将 `pr-ci.yml`、`build-check.yml`、`tag-release.yml`、`nightly.yml` 的 `actions/setup-node` 版本从 Node 18 升级到 Node 24，匹配 `vite@8` / `vitest@4` 的引擎要求，并对齐最新主线
+- `package.json` 新增并提升 `engines.node: >=24.0.0`，避免低版本 Node 继续进入不兼容区间
+- 为避免 npm 在不同版本下对 peer 解析差异导致 `npm ci` 报 lockfile 缺项，显式加入 `@emnapi/core` 与 `@emnapi/runtime` 到 `devDependencies`
+- 补回 `typescript` 到 `devDependencies`，避免 `npm run lint` 在 CI 中因缺少 `tsc` 失败
+- 使用 `npm install --package-lock-only --ignore-scripts --cache .npm-cache` 更新 `package-lock.json`
+
+**测试结果**:
+- 进行过依赖解析与 lockfile 更新
+- 未在当前沙箱完成完整 `npm ci`（本地环境存在 `spawn EPERM` 权限限制）
+
+**相关文件**:
+- `.github/workflows/pr-ci.yml`
+- `.github/workflows/build-check.yml`
+- `.github/workflows/tag-release.yml`
+- `.github/workflows/nightly.yml`
+- `package.json`
+- `package-lock.json`
+
+---
+
 ## 2026-04-13 - 移除外部 AI Review 工作流脚本并同步 CI 文档
 
 **实现范围**:
