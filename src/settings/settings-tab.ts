@@ -208,7 +208,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 		}
 		
 		const typeText = info.createEl('div', {
-			text: `${getBackendTypeLabel(backend.type)}${backend.type === 'acp-bridge' && (backend as AcpBridgeBackendConfig).version ? ` • v${(backend as AcpBridgeBackendConfig).version}` : ''}`,
+			text: `${getBackendTypeLabel(backend.type)}${backend.type === 'acp-bridge' && (backend as AcpBridgeBackendConfig).version ? ` v${(backend as AcpBridgeBackendConfig).version}` : ''}`,
 			cls: 'setting-item-description'
 		});
 		typeText.style.fontSize = '0.85em';
@@ -503,6 +503,19 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					const n = parseInt(v, 10);
 					if (!isNaN(n) && n >= 0) {
 						this.plugin.settings.acpConnectionCacheTtlMinutes = n;
+						await this.saveSettingsNoRebuild();
+					}
+				})
+			);
+
+		new Setting(containerEl)
+			.setName('Session history expiry (days)')
+			.setDesc('Automatically remove chat history older than this many days. Set to 0 to disable expiration.')
+			.addText((t) =>
+				t.setValue(String(this.plugin.settings.sessionHistoryExpiryDays)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					if (!isNaN(n) && n >= 0) {
+						this.plugin.settings.sessionHistoryExpiryDays = n;
 						await this.saveSettingsNoRebuild();
 					}
 				})

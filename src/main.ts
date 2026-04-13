@@ -39,6 +39,7 @@ export default class AgentLinkPlugin extends Plugin {
 		// Initialize SessionManager
 		this.sessionManager = new SessionManager(this);
 		await this.sessionManager.initialize();
+		await this.sessionManager.setHistoryExpiryDays(this.settings.sessionHistoryExpiryDays);
 		
 		logger.setDebug(this.settings.enableDebugLog);
 		logger.info('AgentLink: loading plugin');
@@ -216,6 +217,7 @@ export default class AgentLinkPlugin extends Plugin {
 		const rebuildAdapter = options?.rebuildAdapter ?? true;
 		logger.setDebug(this.settings.enableDebugLog);
 		await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
+		await this.sessionManager.setHistoryExpiryDays(this.settings.sessionHistoryExpiryDays);
 		if (rebuildAdapter) {
 			await this.buildAdapter();
 		}

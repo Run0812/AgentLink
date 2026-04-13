@@ -38,6 +38,7 @@ export class SessionManager {
 	private plugin: Plugin;
 	private sessions: Map<string, SessionData> = new Map();
 	private currentSessionId: string | null = null;
+	private historyExpiryDays = 0;
 
 	constructor(plugin: Plugin) {
 		this.plugin = plugin;
@@ -49,7 +50,13 @@ export class SessionManager {
 		for (const [id, session] of Object.entries(stored)) {
 			this.sessions.set(id, session);
 		}
-		console.log(`[SessionManager] Loaded ${this.sessions.size} sessions`);
+		const removed = await this.pruneExpiredSessions();
+		console.log(`[SessionManager] Loaded ${this.sessions.size} sessions${removed > 0 ? ` (${removed} expired removed)` : ''}`);
+	}
+
+	async setHistoryExpiryDays(days: number): Promise<void> {
+		this.historyExpiryDays = Math.max(0, Math.floor(days));
+		await this.pruneExpiredSessions();
 	}
 
 	/** Save all sessions to storage */
@@ -146,6 +153,11 @@ export class SessionManager {
 
 	/** Get all session metadata (for list view) */
 	getAllSessions(): SessionMetadata[] {
+		const removedExpired = this.pruneExpiredSessionsSync();
+		if (removedExpired > 0) {
+			void this.persist();
+		}
+
 		return Array.from(this.sessions.values())
 			.map(s => ({
 				id: s.id,
@@ -182,6 +194,7 @@ export class SessionManager {
 
 	/** Clean up old sessions if exceeding limit */
 	async cleanupOldSessions(): Promise<void> {
+		const removedExpired = await this.pruneExpiredSessions();
 		if (this.sessions.size > MAX_SESSIONS) {
 			const sorted = this.getAllSessions();
 			const toDelete = sorted.slice(MAX_SESSIONS);
@@ -189,7 +202,37 @@ export class SessionManager {
 				this.sessions.delete(meta.id);
 			}
 			await this.persist();
-			console.log(`[SessionManager] Cleaned up ${toDelete.length} old sessions`);
+			console.log(`[SessionManager] Cleaned up ${toDelete.length} old sessions${removedExpired > 0 ? ` (${removedExpired} expired)` : ''}`);
 		}
+	}
+
+	private async pruneExpiredSessions(now = Date.now()): Promise<number> {
+		const removed = this.pruneExpiredSessionsSync(now);
+		if (removed > 0) {
+			await this.persist();
+		}
+		return removed;
+	}
+
+	private pruneExpiredSessionsSync(now = Date.now()): number {
+		if (this.historyExpiryDays <= 0) {
+			return 0;
+		}
+
+		const expiryMs = this.historyExpiryDays * 24 * 60 * 60 * 1000;
+		let removed = 0;
+
+		for (const [sessionId, session] of this.sessions.entries()) {
+			if (sessionId === this.currentSessionId) {
+				continue;
+			}
+
+			if (now - session.updatedAt > expiryMs) {
+				this.sessions.delete(sessionId);
+				removed++;
+			}
+		}
+
+		return removed;
 	}
 }

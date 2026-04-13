@@ -2140,7 +2140,6 @@ export class ChatView extends ItemView {
 		container.style.borderRadius = '8px';
 		container.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.18)';
 
-		// Header
 		const header = container.createEl('div', { text: 'Chat History' });
 		header.style.fontSize = '0.75rem';
 		header.style.color = 'var(--text-muted)';
@@ -2156,7 +2155,6 @@ export class ChatView extends ItemView {
 			return;
 		}
 
-		// Session list with delete buttons
 		for (const session of sessions) {
 			const item = container.createDiv();
 			item.style.display = 'flex';
@@ -2171,11 +2169,10 @@ export class ChatView extends ItemView {
 				: 'transparent';
 			item.style.cursor = 'pointer';
 
-			// Click to load (on the info part)
 			const info = item.createDiv();
 			info.style.flex = '1';
-			info.style.minWidth = '0'; // Allow truncation
-			
+			info.style.minWidth = '0';
+
 			const title = info.createEl('div', { text: session.title });
 			title.style.fontWeight = '600';
 			title.style.fontSize = '0.85rem';
@@ -2186,7 +2183,7 @@ export class ChatView extends ItemView {
 
 			const date = new Date(session.updatedAt).toLocaleString();
 			const meta = info.createEl('div', {
-				text: `${date} • ${session.messageCount} messages`,
+				text: `${date} - ${session.messageCount} messages`,
 			});
 			meta.style.fontSize = '0.75rem';
 			meta.style.color = 'var(--text-muted)';
@@ -2196,70 +2193,86 @@ export class ChatView extends ItemView {
 				container.style.display = 'none';
 			});
 
-			// Delete button
 			const deleteBtn = item.createEl('button');
-			deleteBtn.innerHTML = '✕';
 			deleteBtn.style.padding = '0.2rem 0.4rem';
-			deleteBtn.style.background = 'transparent';
 			deleteBtn.style.border = 'none';
 			deleteBtn.style.borderRadius = '4px';
 			deleteBtn.style.cursor = 'pointer';
 			deleteBtn.style.fontSize = '0.8rem';
-			deleteBtn.style.color = 'var(--text-muted)';
-			deleteBtn.style.opacity = '0.6';
-			deleteBtn.addEventListener('mouseenter', () => {
-				deleteBtn.style.opacity = '1';
-				deleteBtn.style.background = 'var(--background-modifier-error)';
-				deleteBtn.style.color = 'var(--text-on-accent)';
-			});
-			deleteBtn.addEventListener('mouseleave', () => {
-				deleteBtn.style.opacity = '0.6';
+
+			let deleteArmed = false;
+			let deleteArmedTimer: ReturnType<typeof setTimeout> | null = null;
+			const setDeleteState = (armed: boolean): void => {
+				deleteArmed = armed;
+				if (armed) {
+					deleteBtn.textContent = 'Confirm';
+					deleteBtn.style.opacity = '1';
+					deleteBtn.style.background = 'var(--background-modifier-error)';
+					deleteBtn.style.color = 'var(--text-on-accent)';
+					return;
+				}
+
+				deleteBtn.textContent = 'Delete';
+				deleteBtn.style.opacity = '0.65';
 				deleteBtn.style.background = 'transparent';
 				deleteBtn.style.color = 'var(--text-muted)';
-			});
+			};
+
+			setDeleteState(false);
+
 			deleteBtn.addEventListener('click', async (e) => {
 				e.stopPropagation();
-				const confirmed = await this.confirmDelete(session.title);
-				if (confirmed) {
-					await this.sessionManager.deleteSession(session.id);
-					if (session.id === this.currentSessionId) {
-						this.createNewSession();
+				if (!deleteArmed) {
+					setDeleteState(true);
+					if (deleteArmedTimer !== null) {
+						clearTimeout(deleteArmedTimer);
 					}
-					// Refresh dropdown
-					this.renderHistoryDropdown(container);
-					new Notice('Session deleted');
+					deleteArmedTimer = setTimeout(() => {
+						deleteArmedTimer = null;
+						setDeleteState(false);
+					}, 2500);
+					return;
 				}
+
+				if (deleteArmedTimer !== null) {
+					clearTimeout(deleteArmedTimer);
+					deleteArmedTimer = null;
+				}
+
+				await this.sessionManager.deleteSession(session.id);
+				if (session.id === this.currentSessionId) {
+					this.createNewSession();
+				}
+				this.renderHistoryDropdown(container);
+				new Notice('Session deleted');
 			});
 		}
 	}
 
 	/** Render a session list item */
 	private renderSessionListItem(
-		container: HTMLElement, 
-		session: SessionMetadata, 
+		container: HTMLElement,
+		session: SessionMetadata,
 		modal: Modal
 	): void {
-		const item = container.createDiv({ 
+		const item = container.createDiv({
 			cls: `agentlink-session-item ${session.id === this.currentSessionId ? 'is-active' : ''}`
 		});
-		
-		// Title and meta
+
 		const info = item.createDiv({ cls: 'agentlink-session-item-info' });
-		info.createEl('div', { 
+		info.createEl('div', {
 			text: session.title,
 			cls: 'agentlink-session-item-title'
 		});
-		
+
 		const date = new Date(session.updatedAt).toLocaleString();
-		info.createEl('div', { 
-			text: `${date} • ${session.messageCount} messages`,
+		info.createEl('div', {
+			text: `${date} - ${session.messageCount} messages`,
 			cls: 'agentlink-session-item-meta'
 		});
-		
-		// Actions
+
 		const actions = item.createDiv({ cls: 'agentlink-session-item-actions' });
-		
-		// Load button
+
 		new ButtonComponent(actions)
 			.setButtonText(session.id === this.currentSessionId ? 'Current' : 'Load')
 			.setDisabled(session.id === this.currentSessionId)
@@ -2268,58 +2281,41 @@ export class ChatView extends ItemView {
 				this.loadSession(session.id);
 				new Notice('Session loaded');
 			});
-		
-		// Delete button
-		new ButtonComponent(actions)
-			.setButtonText('Delete')
-			.setWarning()
-			.onClick(async () => {
-				const confirmed = await this.confirmDelete(session.title);
-				if (confirmed) {
-					await this.sessionManager.deleteSession(session.id);
-					if (session.id === this.currentSessionId) {
-						this.createNewSession();
-					}
-					modal.close();
-					new Notice('Session deleted');
-					// Reopen modal to refresh list
-					this.openSessionList();
-				}
-			});
-	}
 
-	/** Confirm deletion */
-	private confirmDelete(title: string): Promise<boolean> {
-		return new Promise((resolve) => {
-			const modal = new Modal(this.app);
-			modal.titleEl.setText('Delete Session');
-			
-			modal.contentEl.createEl('p', {
-				text: `Are you sure you want to delete "${title}"? This cannot be undone.`
-			});
-			
-			const btnContainer = modal.contentEl.createDiv({ cls: 'agentlink-modal-buttons' });
-			btnContainer.style.display = 'flex';
-			btnContainer.style.gap = '0.5em';
-			btnContainer.style.marginTop = '1em';
-			btnContainer.style.justifyContent = 'flex-end';
-			
-			new ButtonComponent(btnContainer)
-				.setButtonText('Cancel')
-				.onClick(() => {
-					modal.close();
-					resolve(false);
-				});
-			
-			new ButtonComponent(btnContainer)
-				.setButtonText('Delete')
-				.setWarning()
-				.onClick(() => {
-					modal.close();
-					resolve(true);
-				});
-			
-			modal.open();
+		const deleteBtn = new ButtonComponent(actions)
+			.setButtonText('Delete')
+			.setWarning();
+		let deleteArmed = false;
+		let deleteArmedTimer: ReturnType<typeof setTimeout> | null = null;
+		const setDeleteState = (armed: boolean): void => {
+			deleteArmed = armed;
+			deleteBtn.setButtonText(armed ? 'Confirm' : 'Delete');
+		};
+
+		deleteBtn.onClick(async () => {
+			if (!deleteArmed) {
+				setDeleteState(true);
+				if (deleteArmedTimer !== null) {
+					clearTimeout(deleteArmedTimer);
+				}
+				deleteArmedTimer = setTimeout(() => {
+					deleteArmedTimer = null;
+					setDeleteState(false);
+				}, 2500);
+				return;
+			}
+
+			if (deleteArmedTimer !== null) {
+				clearTimeout(deleteArmedTimer);
+				deleteArmedTimer = null;
+			}
+
+			await this.sessionManager.deleteSession(session.id);
+			if (session.id === this.currentSessionId) {
+				this.createNewSession();
+			}
+			item.remove();
+			new Notice('Session deleted');
 		});
 	}
 
@@ -3124,3 +3120,4 @@ export class ChatView extends ItemView {
 		}
 	}
 }
+

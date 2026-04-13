@@ -47,6 +47,8 @@ export interface AgentLinkSettings {
   thinkingMode: 'none' | 'quick' | 'balanced' | 'deep';
   /** Keep inactive ACP adapters alive for this many minutes before cleanup. 0 disables caching. */
   acpConnectionCacheTtlMinutes: number;
+  /** Session history expiry in days. 0 disables expiration. */
+  sessionHistoryExpiryDays: number;
 }
 
 /** Create preset Kimi Code backend config */
@@ -97,6 +99,7 @@ export const DEFAULT_SETTINGS: AgentLinkSettings = {
   showThinking: true,
   thinkingMode: 'balanced',
   acpConnectionCacheTtlMinutes: 10,
+  sessionHistoryExpiryDays: 30,
 };
 
 /**
