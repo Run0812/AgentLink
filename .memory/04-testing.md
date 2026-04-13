@@ -37,6 +37,12 @@ npm run test:watch
 
 # 快速构建（仅构建，跳过检查）
 npm run build:quick
+
+# 仅同步构建产物到本地 dev vault
+npm run sync:dev
+
+# 一键构建并发布到本地 dev vault（手动触发）
+npm run publish:dev
 ```
 
 ---
@@ -183,11 +189,27 @@ dev/
 ```
 
 **启动测试**:
-1. 构建插件: `npm run build:quick`
-2. 文件已自动复制到 `dev/.obsidian/plugins/agentlink/`
+1. 手动发布（推荐，一条命令）: `npm run publish:dev`
+2. 或分步执行:
+   - `npm run build:quick`
+   - `npm run sync:dev`
 3. 用 Obsidian 打开 `dev/` 目录作为一个 vault
 4. 在 Obsidian 设置中启用 Community Plugins → AgentLink
 5. 使用 Ribbon 图标或 Command Palette 打开 AgentLink 面板
+
+### Codex 运行操作（手动发布到 dev）
+
+在 Codex 终端中执行以下命令即可手动发布到本地 `dev/.obsidian/plugins/agentlink/`：
+
+```bash
+npm run publish:dev
+```
+
+如果你已经构建完成，仅想重新覆盖 dev vault 中的插件文件，执行：
+
+```bash
+npm run sync:dev
+```
 
 ---
 
@@ -382,4 +404,4 @@ npm version major  # 大版本
 
 ---
 
-*最后更新: 2026-04-09*
+*最后更新: 2026-04-13*

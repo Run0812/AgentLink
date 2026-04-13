@@ -9,6 +9,26 @@
 
 ---
 
+## 2026-04-13 - 新增本地 dev 手动发布运行操作（Codex 可直接执行）
+
+**实现范围**:
+- 本地发布流程标准化
+- 测试文档修正
+
+**完成内容**:
+- 在 `package.json` 增加 `npm run sync:dev`（仅同步）与 `npm run publish:dev`（构建+同步）脚本
+- 在 `.memory/04-testing.md` 增加 “Codex 运行操作（手动发布到 dev）” 章节
+- 修正开发 vault 步骤描述，不再使用“build 后自动复制”的不准确说法，改为显式手动发布命令
+
+**测试结果**:
+- `npm run publish:dev` 通过（包含 `build:quick` 与 `sync:dev`）
+
+**相关文件**:
+- `package.json`
+- `.memory/04-testing.md`
+
+---
+
 ## 2026-04-13 - 修复 review commit 引入的 package.json 重复键与 lockfile 版本冲突
 
 **实现范围**:
