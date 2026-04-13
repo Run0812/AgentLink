@@ -317,10 +317,13 @@ export class ToolExecutor {
 		const timeoutMs = timeout || 30000; // Default 30s timeout
 
 		return new Promise((resolve) => {
-			const args = ['-c', command];
-			const child = spawn('bash', args, {
+			const child = spawn(command, {
 				cwd: workingDir,
 				env: process.env,
+				shell: process.platform === 'win32'
+					? (process.env.ComSpec || 'cmd.exe')
+					: (process.env.SHELL || '/bin/sh'),
+				stdio: ['ignore', 'pipe', 'pipe'],
 			});
 
 			let stdout = '';

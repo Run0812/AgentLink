@@ -94,6 +94,7 @@ export class ChatView extends ItemView {
 	private configButtonsContainer!: HTMLElement;
 	private planContainer!: HTMLElement;
 	private detachSessionStateListener?: () => void;
+	private globalDocumentListenerCleanup: Array<() => void> = [];
 
 	// ── Phase 5: Input State & Autocomplete ─────────────────────────────
 	private inputStateContainer!: HTMLElement;
@@ -169,6 +170,7 @@ export class ChatView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		this.clearGlobalDocumentListeners();
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass('agentlink-container');
@@ -202,6 +204,7 @@ export class ChatView extends ItemView {
 	async onClose(): Promise<void> {
 		this.detachSessionStateListener?.();
 		this.detachSessionStateListener = undefined;
+		this.clearGlobalDocumentListeners();
 
 		if (this.configButtonsContainer) {
 			render(null, this.configButtonsContainer);
@@ -213,6 +216,27 @@ export class ChatView extends ItemView {
 			} catch {
 				// ignore
 			}
+		}
+	}
+
+	private registerDocumentListener<K extends keyof DocumentEventMap>(
+		type: K,
+		handler: (event: DocumentEventMap[K]) => void,
+		options?: boolean | AddEventListenerOptions,
+	): void {
+		document.addEventListener(type, handler as EventListener, options);
+		this.globalDocumentListenerCleanup.push(() => {
+			document.removeEventListener(type, handler as EventListener, options);
+		});
+	}
+
+	private clearGlobalDocumentListeners(): void {
+		if (this.globalDocumentListenerCleanup.length === 0) {
+			return;
+		}
+
+		for (const cleanup of this.globalDocumentListenerCleanup.splice(0)) {
+			cleanup();
 		}
 	}
 
@@ -283,7 +307,9 @@ export class ChatView extends ItemView {
 			historyDropdown.style.display = isOpen ? 'none' : 'block';
 			if (!isOpen) this.renderHistoryDropdown(historyDropdown);
 		});
-		document.addEventListener('click', () => historyDropdown.style.display = 'none');
+		this.registerDocumentListener('click', () => {
+			historyDropdown.style.display = 'none';
+		});
 		
 		// Clear button
 		this.clearBtn = rightSection.createEl('button');
@@ -474,7 +500,9 @@ export class ChatView extends ItemView {
 			agentDropdown.style.display = isOpen ? 'none' : 'block';
 			if (!isOpen) this.renderAgentDropdown(agentDropdown);
 		});
-		document.addEventListener('click', () => agentDropdown.style.display = 'none');
+		this.registerDocumentListener('click', () => {
+			agentDropdown.style.display = 'none';
+		});
 
 		// Model selector button with dropdown
 		const modelContainer = this.bottomToolbar.createDiv();
@@ -504,7 +532,9 @@ export class ChatView extends ItemView {
 			modelDropdown.style.display = isOpen ? 'none' : 'block';
 			if (!isOpen) this.renderModelDropdown(modelDropdown);
 		});
-		document.addEventListener('click', () => modelDropdown.style.display = 'none');
+		this.registerDocumentListener('click', () => {
+			modelDropdown.style.display = 'none';
+		});
 
 		const contextUsageContainer = this.bottomToolbar.createDiv();
 		contextUsageContainer.style.position = 'relative';
@@ -783,7 +813,7 @@ export class ChatView extends ItemView {
 			e.preventDefault();
 		});
 
-		document.addEventListener('mousemove', (e) => {
+		this.registerDocumentListener('mousemove', (e) => {
 			if (!isResizing) return;
 			const deltaY = startY - e.clientY;
 			const newHeight = Math.max(this.inputMinHeight, startHeight + deltaY);
@@ -793,7 +823,7 @@ export class ChatView extends ItemView {
 			this.inputAreaContainer.style.flex = 'none';
 		});
 
-		document.addEventListener('mouseup', () => {
+		this.registerDocumentListener('mouseup', () => {
 			if (isResizing) {
 				isResizing = false;
 				document.body.style.cursor = '';
@@ -1750,8 +1780,10 @@ export class ChatView extends ItemView {
 
 		// Load messages
 		for (const msg of session.messages) {
-			this.session.addMessage(msg.role, msg.content, msg.metadata);
-			this.renderMessage(msg);
+			const restored = this.session.addMessage(msg.role, msg.content, msg.metadata);
+			restored.id = msg.id;
+			restored.timestamp = msg.timestamp;
+			this.renderMessage(restored);
 		}
 
 		this.updateSessionTitle(session.title);

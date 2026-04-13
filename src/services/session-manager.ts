@@ -10,6 +10,7 @@
 
 import { Plugin } from 'obsidian';
 import { ChatMessage, generateId } from '../core/types';
+import { loadStoredSessions, saveStoredSessions } from './plugin-data-storage';
 
 export interface SessionMetadata {
 	id: string;
@@ -31,7 +32,6 @@ export interface SessionData {
 	messageCount?: number;
 }
 
-const STORAGE_KEY = 'agentlink-sessions';
 const MAX_SESSIONS = 50; // Keep last 50 sessions
 
 export class SessionManager {
@@ -45,21 +45,16 @@ export class SessionManager {
 
 	/** Initialize and load existing sessions from storage */
 	async initialize(): Promise<void> {
-		const data = await this.plugin.loadData() as Record<string, unknown> | undefined;
-		if (data && data[STORAGE_KEY]) {
-			const stored = data[STORAGE_KEY] as Record<string, SessionData>;
-			for (const [id, session] of Object.entries(stored)) {
-				this.sessions.set(id, session);
-			}
+		const stored = await loadStoredSessions<SessionData>(this.plugin);
+		for (const [id, session] of Object.entries(stored)) {
+			this.sessions.set(id, session);
 		}
 		console.log(`[SessionManager] Loaded ${this.sessions.size} sessions`);
 	}
 
 	/** Save all sessions to storage */
 	private async persist(): Promise<void> {
-		const data = (await this.plugin.loadData()) as Record<string, unknown> || {};
-		data[STORAGE_KEY] = Object.fromEntries(this.sessions);
-		await this.plugin.saveData(data);
+		await saveStoredSessions(this.plugin, Object.fromEntries(this.sessions));
 	}
 
 	/** Create a new session */
@@ -75,7 +70,7 @@ export class SessionManager {
 		};
 		this.sessions.set(id, session);
 		this.currentSessionId = id;
-		this.persist();
+		void this.persist();
 		return session;
 	}
 

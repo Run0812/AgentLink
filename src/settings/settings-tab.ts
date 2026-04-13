@@ -9,10 +9,29 @@ import { LocalAgentScanModal } from './local-agent-scanner';
 export class AgentLinkSettingTab extends PluginSettingTab {
 	plugin: AgentLinkPlugin;
 	private editingBackendId: string | null = null;
+	private delayedSaveHandle: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(app: App, plugin: AgentLinkPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	private async saveSettingsNoRebuild(): Promise<void> {
+		await this.plugin.saveSettings({ rebuildAdapter: false });
+	}
+
+	private scheduleSettingsSave(options?: { rebuildAdapter?: boolean }, delayMs = 250): void {
+		if (this.delayedSaveHandle !== null) {
+			clearTimeout(this.delayedSaveHandle);
+		}
+
+		this.delayedSaveHandle = setTimeout(() => {
+			this.delayedSaveHandle = null;
+			void this.plugin.saveSettings(options).catch((error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				new Notice(`Failed to save settings: ${message}`);
+			});
+		}, delayMs);
 	}
 
 	display(): void {
@@ -264,9 +283,9 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.setDesc('Display name for this backend.')
 			.addText(text => {
 				text.setValue(backend.name)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						backend.name = value || backend.id;
-						await this.plugin.saveSettings();
+						this.scheduleSettingsSave({ rebuildAdapter: false });
 					});
 			});
 
@@ -303,9 +322,9 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addText(text => {
 				text.setPlaceholder('kimi')
 					.setValue(config.command)
-					.onChange(async (value) => {
+					.onChange((value) => {
 						config.command = value;
-						await this.plugin.saveSettings();
+						this.scheduleSettingsSave({ rebuildAdapter: true });
 					});
 			});
 
@@ -315,9 +334,9 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addText(text => {
 				text.setPlaceholder('acp')
 					.setValue(config.args.join(' '))
-					.onChange(async (value) => {
+					.onChange((value) => {
 						config.args = value.trim().split(/\s+/).filter(Boolean);
-						await this.plugin.saveSettings();
+						this.scheduleSettingsSave({ rebuildAdapter: true });
 					});
 			});
 
@@ -353,7 +372,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.enableAcpRegistrySync)
 					.onChange(async (value) => {
 						this.plugin.settings.enableAcpRegistrySync = value;
-						await this.plugin.saveSettings();
+						await this.saveSettingsNoRebuild();
 					});
 			});
 
@@ -364,11 +383,11 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addText(text => {
 				text.setPlaceholder('12')
 					.setValue(String(this.plugin.settings.acpRegistrySyncIntervalHours))
-					.onChange(async (value) => {
+					.onChange((value) => {
 						const n = parseInt(value, 10);
 						if (!isNaN(n) && n >= 1 && n <= 168) {
 							this.plugin.settings.acpRegistrySyncIntervalHours = n;
-							await this.plugin.saveSettings();
+							this.scheduleSettingsSave({ rebuildAdapter: false });
 						}
 					});
 				text.inputEl.type = 'number';
@@ -437,7 +456,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					const n = parseInt(v, 10);
 					if (!isNaN(n) && n >= 0) {
 						this.plugin.settings.requestTimeoutMs = n;
-						await this.plugin.saveSettings();
+						await this.saveSettingsNoRebuild();
 					}
 				})
 			);
@@ -448,9 +467,9 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addTextArea((ta) => {
 				ta.setValue(this.plugin.settings.systemPrompt)
 					.setPlaceholder('You are a helpful AI assistant…')
-					.onChange(async (v) => {
+					.onChange((v) => {
 						this.plugin.settings.systemPrompt = v;
-						await this.plugin.saveSettings();
+						this.scheduleSettingsSave({ rebuildAdapter: false });
 					});
 				ta.inputEl.rows = 3;
 				ta.inputEl.style.width = '100%';
@@ -462,7 +481,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle(
 				(t) => t.setValue(this.plugin.settings.autoReconnect).onChange(async (v) => {
 					this.plugin.settings.autoReconnect = v;
-					await this.plugin.saveSettings();
+					await this.saveSettingsNoRebuild();
 				})
 			);
 
@@ -472,7 +491,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle(
 				(t) => t.setValue(this.plugin.settings.enableDebugLog).onChange(async (v) => {
 					this.plugin.settings.enableDebugLog = v;
-					await this.plugin.saveSettings();
+					await this.saveSettingsNoRebuild();
 				})
 			);
 
@@ -484,7 +503,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 					const n = parseInt(v, 10);
 					if (!isNaN(n) && n >= 0) {
 						this.plugin.settings.acpConnectionCacheTtlMinutes = n;
-						await this.plugin.saveSettings();
+						await this.saveSettingsNoRebuild();
 					}
 				})
 			);
@@ -499,7 +518,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.autoConfirmRead).onChange(async (v) => {
 					this.plugin.settings.autoConfirmRead = v;
-					await this.plugin.saveSettings();
+					await this.saveSettingsNoRebuild();
 				})
 			);
 
@@ -509,7 +528,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.autoConfirmEdit).onChange(async (v) => {
 					this.plugin.settings.autoConfirmEdit = v;
-					await this.plugin.saveSettings();
+					await this.saveSettingsNoRebuild();
 				})
 			);
 
@@ -519,7 +538,7 @@ export class AgentLinkSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.showThinking).onChange(async (v) => {
 					this.plugin.settings.showThinking = v;
-					await this.plugin.saveSettings();
+					await this.saveSettingsNoRebuild();
 				})
 			);
 	}

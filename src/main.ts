@@ -21,6 +21,7 @@ import { ChatView, AGENTLINK_VIEW_TYPE } from './ui/chat-view';
 import { AcpBridgeAdapter, AcpBridgeAdapterConfig } from './adapters/acp-bridge-adapter';
 import { SessionManager } from './services/session-manager';
 import { AcpAdapterPool } from './services/acp-adapter-pool';
+import { loadStoredSettings, saveStoredSettings } from './services/plugin-data-storage';
 
 export default class AgentLinkPlugin extends Plugin {
 	settings!: AgentLinkSettings;
@@ -115,7 +116,7 @@ export default class AgentLinkPlugin extends Plugin {
 	// ── Settings ───────────────────────────────────────────────────────
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
+		const loaded = await loadStoredSettings(this);
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
 		let settingsChanged = false;
 
@@ -161,7 +162,7 @@ export default class AgentLinkPlugin extends Plugin {
 		}
 
 		if (settingsChanged) {
-			await this.saveData(this.settings);
+			await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
 		}
 	}
 
@@ -204,21 +205,26 @@ export default class AgentLinkPlugin extends Plugin {
 			const registry = await fetchAcpRegistry();
 			await saveLocalAcpRegistry(this.app, registry);
 			this.settings.lastAcpRegistrySync = new Date(now).toISOString();
-			await this.saveData(this.settings);
+			await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
 			logger.info(`[AgentLink] Registry synced: ${registry.agents.length} agents available`);
 		} catch (err) {
 			console.warn('[AgentLink] Failed to fetch ACP registry from CDN:', err);
 		}
 	}
 
-	async saveSettings(): Promise<void> {
+	async saveSettings(options?: { rebuildAdapter?: boolean }): Promise<void> {
+		const rebuildAdapter = options?.rebuildAdapter ?? true;
 		logger.setDebug(this.settings.enableDebugLog);
-		await this.saveData(this.settings);
-		await this.buildAdapter();
+		await saveStoredSettings(this, this.settings as unknown as Record<string, unknown>);
+		if (rebuildAdapter) {
+			await this.buildAdapter();
+		}
 		// Refresh the open view
 		const view = this.getChatView();
 		if (view && this.adapter) {
-			view.setAdapter(this.adapter);
+			if (rebuildAdapter) {
+				view.setAdapter(this.adapter);
+			}
 			view.refreshSettings();
 		}
 	}
