@@ -13,7 +13,7 @@
 
 ## Checklist
 
-- [ ] I have read [CONTRIBUTING.md](../CONTRIBUTING.md)
+- [ ] I have read [CONTRIBUTING.md](CONTRIBUTING.md)
 - [ ] Code compiles without errors (`npm run lint`)
 - [ ] All tests pass (`npm run test`)
 - [ ] Build succeeds (`npm run build:quick`)

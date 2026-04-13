@@ -4,7 +4,7 @@ on:
   push:
     tags:
       # Matches x.y.z – no "v" prefix, per Obsidian community plugin convention
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]*.[0-9]*.[0-9]*'
 
 permissions:
   contents: write   # required to create GitHub Releases
