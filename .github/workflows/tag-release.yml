@@ -100,10 +100,15 @@ jobs:
           fi
 
       # ── Generate release notes ─────────────────────────────────────────
+      # Notes are written to a file (not passed via --notes) so that commit
+      # messages containing quotes, newlines, or other special characters
+      # cannot break shell quoting or be misinterpreted as CLI arguments.
       - name: Generate release notes
-        id: notes
         run: |
           VERSION="${{ steps.tag.outputs.version }}"
+          NOTES_FILE="$(mktemp /tmp/release-notes-XXXXXX.md)"
+          echo "NOTES_FILE=${NOTES_FILE}" >> "$GITHUB_ENV"
+
           # Find the previous semver tag (if any)
           PREV=$(git tag --sort=-version:refname \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
@@ -111,7 +116,6 @@ jobs:
             | head -1 || echo "")
 
           {
-            echo "notes<<RELEASE_NOTES_EOF"
             if [ -n "$PREV" ]; then
               echo "## What's Changed since ${PREV}"
               git log "${PREV}..HEAD" \
@@ -127,8 +131,7 @@ jobs:
             echo ""
             echo "## Installation"
             echo "Download \`main.js\` and \`manifest.json\` (and optionally \`styles.css\`) into your vault's \`.obsidian/plugins/agentlink/\` directory."
-            echo "RELEASE_NOTES_EOF"
-          } >> "$GITHUB_OUTPUT"
+          } > "$NOTES_FILE"
 
       # ── Create GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
@@ -145,5 +148,5 @@ jobs:
 
           gh release create "$VERSION" \
             --title "AgentLink ${VERSION}" \
-            --notes "${{ steps.notes.outputs.notes }}" \
+            --notes-file "$NOTES_FILE" \
             $ASSETS
