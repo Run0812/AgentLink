@@ -24,12 +24,16 @@
   ],
   "author": "Run0812",
   "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "devDependencies": {
-    "@types/node": "^18.0.0",
+    "@emnapi/core": "^1.9.2",
+    "@emnapi/runtime": "^1.9.2",
+    "@types/node": "^20.19.0",
     "builtin-modules": "^3.3.0",
-    "esbuild": "0.17.3",
+    "esbuild": "^0.27.0",
     "obsidian": "latest",
-    "tslib": "2.4.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   },

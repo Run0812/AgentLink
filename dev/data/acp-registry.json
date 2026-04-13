@@ -219,19 +219,51 @@
     {
       "id": "crow-cli",
       "name": "crow-cli",
-      "version": "0.1.14",
+      "version": "0.1.19",
       "description": "Minimal ACP Native Coding Agent",
       "repository": "https://github.com/crow-cli/crow-cli",
+      "website": "https://crow-ai.dev",
       "authors": [
         "Thomas Wood"
       ],
       "license": "Apache-2.0",
       "distribution": {
-        "uvx": {
-          "package": "crow-cli",
-          "args": [
-            "acp"
-          ]
+        "binary": {
+          "darwin-aarch64": {
+            "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.19/crow-cli-darwin-aarch64.tar.gz",
+            "cmd": "./crow-cli",
+            "args": [
+              "acp"
+            ]
+          },
+          "darwin-x86_64": {
+            "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.19/crow-cli-darwin-x86_64.tar.gz",
+            "cmd": "./crow-cli",
+            "args": [
+              "acp"
+            ]
+          },
+          "linux-aarch64": {
+            "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.19/crow-cli-linux-aarch64.tar.gz",
+            "cmd": "./crow-cli",
+            "args": [
+              "acp"
+            ]
+          },
+          "linux-x86_64": {
+            "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.19/crow-cli-linux-x86_64.tar.gz",
+            "cmd": "./crow-cli",
+            "args": [
+              "acp"
+            ]
+          },
+          "windows-x86_64": {
+            "archive": "https://github.com/crow-cli/crow-cli/releases/download/v0.1.19/crow-cli-windows-x86_64.zip",
+            "cmd": "./crow-cli.exe",
+            "args": [
+              "acp"
+            ]
+          }
         }
       },
       "icon": "https://cdn.agentclientprotocol.com/registry/v1/latest/crow-cli.svg"
@@ -363,7 +395,7 @@
     {
       "id": "gemini",
       "name": "Gemini CLI",
-      "version": "0.37.0",
+      "version": "0.37.1",
       "description": "Google's official CLI for Gemini",
       "repository": "https://github.com/google-gemini/gemini-cli",
       "website": "https://geminicli.com",
@@ -373,7 +405,7 @@
       "license": "Apache-2.0",
       "distribution": {
         "npx": {
-          "package": "@google/gemini-cli@0.37.0",
+          "package": "@google/gemini-cli@0.37.1",
           "args": [
             "--acp"
           ]

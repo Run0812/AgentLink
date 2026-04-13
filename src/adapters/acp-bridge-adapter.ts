@@ -6,9 +6,7 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 import { spawn, ChildProcess } from 'node:child_process';
-import { resolve } from 'node:path';
 import { Writable, Readable } from 'node:stream';
-import { pathToFileURL } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { App, TFile } from 'obsidian';
 
@@ -34,7 +32,12 @@ import {
 import { CancellationError, ConnectionError, TimeoutError } from '../core/errors';
 import { logger } from '../core/logger';
 import { ProcessManager } from '../services/process-manager';
-import { ensureVaultParentFolders, resolveVaultRelativePath, sliceFileContent } from '../services/vault-paths';
+import {
+	buildWorkspaceFileUri as buildVaultWorkspaceFileUri,
+	ensureVaultParentFolders,
+	resolveVaultRelativePath,
+	sliceFileContent,
+} from '../services/vault-paths';
 
 // ============================================================================
 // Adapter Configuration (using shared types)
@@ -1346,7 +1349,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	private buildWorkspaceFileUri(relativePath: string): string {
-		return pathToFileURL(resolve(this.getWorkingDirectory(), relativePath)).toString();
+		return buildVaultWorkspaceFileUri(this.getWorkingDirectory(), relativePath);
 	}
 
 	private mapSessionModes(modes: unknown): SessionModeOption[] {

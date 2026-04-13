@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ensureVaultParentFolders, resolveVaultRelativePath, sliceFileContent } from '../../src/services/vault-paths';
 
@@ -22,22 +24,28 @@ function createMockApp(basePath?: string) {
 
 describe('vault-paths', () => {
 	it('maps absolute ACP paths inside the vault to vault-relative paths', () => {
-		const { app } = createMockApp('D:\\vault');
+		const vaultBasePath = resolve(tmpdir(), 'agentlink-test-vault');
+		const absoluteFilePath = resolve(vaultBasePath, 'notes', 'review.md');
+		const slashAbsoluteFilePath = absoluteFilePath.replace(/\\/g, '/');
+		const { app } = createMockApp(vaultBasePath);
 
-		expect(resolveVaultRelativePath(app, 'D:\\vault\\notes\\review.md')).toBe('notes/review.md');
-		expect(resolveVaultRelativePath(app, '/D:/vault/notes/review.md')).toBe('notes/review.md');
+		expect(resolveVaultRelativePath(app, absoluteFilePath)).toBe('notes/review.md');
+		expect(resolveVaultRelativePath(app, slashAbsoluteFilePath)).toBe('notes/review.md');
 		expect(resolveVaultRelativePath(app, 'notes/review.md')).toBe('notes/review.md');
 	});
 
 	it('rejects paths outside the current vault', () => {
-		const { app } = createMockApp('D:\\vault');
+		const vaultBasePath = resolve(tmpdir(), 'agentlink-test-vault');
+		const outsideFilePath = resolve(tmpdir(), 'agentlink-test-other-vault', 'review.md');
+		const { app } = createMockApp(vaultBasePath);
 
-		expect(() => resolveVaultRelativePath(app, 'D:\\other\\review.md')).toThrow('outside the current vault');
+		expect(() => resolveVaultRelativePath(app, outsideFilePath)).toThrow('outside the current vault');
 		expect(() => resolveVaultRelativePath(app, '../review.md')).toThrow('outside the current vault');
 	});
 
 	it('creates missing parent folders before a write', async () => {
-		const { app, createFolder, entries } = createMockApp('D:\\vault');
+		const vaultBasePath = resolve(tmpdir(), 'agentlink-test-vault');
+		const { app, createFolder, entries } = createMockApp(vaultBasePath);
 		entries.set('notes', { children: [] });
 
 		await ensureVaultParentFolders(app, 'notes/reviews/review.md');
