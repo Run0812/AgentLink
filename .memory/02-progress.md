@@ -9,6 +9,51 @@
 
 ---
 
+## 2026-04-14 - README 收敛为产品定位入口，并新增开发者文档索引
+
+**实现范围**:
+- 重写根目录 README，删除过时的多后端描述
+- 新增 `Doc/Developer-Guide.md` 作为开发文档入口
+
+**完成内容**:
+- `README.md` 改为简洁目录与大纲，明确插件目标、能力边界和当前只支持 ACP 的事实
+- 在 README 中补充“不内置 Agent”“不作为通用前端”“未来可能支持部分 CLI SDK 接入”的定位说明
+- 新增 `Doc/Developer-Guide.md`，集中链接贡献、发布和 `.memory/` 文档，避免 README 继续膨胀
+
+**测试结果**:
+- 本次为文档更新，未运行构建或测试
+
+**相关文件**:
+- `README.md`
+- `Doc/Developer-Guide.md`
+- `.memory/02-progress.md`
+
+---
+
+## 2026-04-14 - 人类文档迁移到 Doc，并明确 Doc / .memory 分层
+
+**实现范围**:
+- 将根目录中的人类文档迁移到 `Doc/`
+- 明确 `.memory/` 与 `Doc/` 的受众边界
+
+**完成内容**:
+- 将 `CONTRIBUTING.md` 与 `RELEASE.md` 从根目录移动到 `Doc/`
+- 更新 `README.md`，新增“文档分层”说明，明确 `.memory/` 给 agent，`Doc/` 给人类
+- 更新 `Doc/Developer-Guide.md`，补充文档分层说明并修正文档链接
+- 更新 `Doc/CONTRIBUTING.md` 内对发布文档的相对链接
+
+**测试结果**:
+- 本次为文档整理，未运行构建或测试
+
+**相关文件**:
+- `README.md`
+- `Doc/Developer-Guide.md`
+- `Doc/CONTRIBUTING.md`
+- `Doc/RELEASE.md`
+- `.memory/02-progress.md`
+
+---
+
 ## 2026-04-13 - 架构模块化 I7：memory 文档收口与最终验收
 
 **实现范围**:
@@ -1946,4 +1991,4 @@ build/
 
 ---
 
-*最后更新: 2026-04-13*
+*最后更新: 2026-04-14*

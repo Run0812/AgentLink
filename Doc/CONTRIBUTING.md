@@ -99,7 +99,7 @@ chore: bump vitest to 4.2
 
 ## Releasing
 
-See [RELEASE.md](RELEASE.md) for the full release process.
+See [RELEASE.md](./RELEASE.md) for the full release process.
 
 ---
 
