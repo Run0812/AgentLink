@@ -29,13 +29,23 @@
 | Phase 3 - ACP Bridge Mode | 完成 | 100% |
 | Phase 4 - 历史对话保存 | 完成 | 100% |
 | Phase 5 - agent命令支持 | 完成 | 100% |
-| Phase 6 - UI-UX 优化 | 进行中 | 91% |
+| Phase 6 - UI-UX 优化 | 完成 | 100% |
 
 ---
 
 ## 当前焦点任务
 
-### ACP 核心化重构（2026-04-14）
+### 待发布收尾（当前重点）
+
+**目标**: Phase 6 封板后进入待发布状态，按发布检查清单完成最终门禁。
+
+- [ ] 按 [04-testing.md](./04-testing.md) 的“发布检查清单”逐项完成
+- [ ] 运行 `npm run lint`
+- [ ] 运行 `npm test`
+- [ ] 运行 `npm run build`
+- [ ] 更新版本号与发布记录（`manifest.json` / `versions.json` / 发布说明）
+
+### ACP 核心化重构（2026-04-14，已完成）
 
 **目标**: 在保持现有用户行为的前提下，将聊天流程逐步收敛为 `host + acp + core + ui` 边界。
 
@@ -46,7 +56,7 @@
 - [x] 增补 ACP 归一化、取消语义、turn 状态与 prompt context 单元测试
 - [x] 同步更新 `AGENTS.md`、`.memory/`、`Doc/Developer-Guide.md`
 
-### Phase 6 - UI-UX 优化（当前重点）
+### Phase 6 - UI-UX 优化（已完成）
 
 **目标**: 修复 UI 交互问题，并补齐 ACP Slash Commands / Session Modes / Agent Plan / Session Config Options 的用户可见能力
 
@@ -64,7 +74,7 @@
 - [x] **@ 和 / 整体渲染** - `@` 引用和 `/command` 已作为 inline token 嵌入输入框文字流，不再显示为输入框外单独状态栏
 - [x] **输入框内嵌 token composer** - 输入区已切换为 `contenteditable` composer，支持在文字流内插入引用 token 和命令 token
 - [x] **标题栏布局结构优化** - 清理标题栏残留旧按钮样式，统一标题栏层级、按钮样式和单分隔线表现
-- [ ] **底部工具栏图标方案** - 统一 icon 资源来源和风格，再替换现有临时图标
+- [x] **底部工具栏图标方案** - 统一 icon 资源来源和风格，再替换现有临时图标
 
 #### ACP 命令与会话配置
 - [x] **/ 命令功能验证** - 区分内建命令与 Agent `availableCommands`，避免将 Agent 命令误当作内建命令执行
@@ -75,13 +85,13 @@
 - [x] **Session Config 动态刷新** - 收到 `config_option_update` 后立即刷新工具栏，不再显示伪造默认选项
 - [x] **Session Modes 兼容支持** - 当 Agent 未提供 `configOptions` 时回退到 `modes`，支持 `session/set_mode` 与 `current_mode_update`
 - [x] **Agent Plan 面板** - 展示 `plan` entries，并按协议使用完整列表替换当前 plan
+- [x] **Agent Plan 协议验收与显示打磨** - 按官方 `agent-plan` 规范验证“完整列表替换”语义，补齐空列表清空场景，并统一 Plan 条目状态/优先级可读显示
 - [x] **ACP 协议回归测试** - 覆盖 `available_commands_update`、`current_mode_update`、`plan`、`config_option_update` 以及 `set_mode` / `set_config_option`
 - [x] **ACP 认证流程** - `session/new` 遇到认证错误时弹出认证方式选择，调用 `authenticate` 后自动重试建 session
-- [ ] **ACP 扩展认证方式** - 评估并实现 UNSTABLE 的 `env_var` / `terminal` auth method 支持
 
 #### 文档与收尾
-- [ ] **README.md 重写** - 反映当前 ACP 能力、缓存策略、权限与 UI 结构
-- [ ] **遗留 mock 文案清理** - 清理代码和 UI 中残留的 mock backend 文案与注释
+- [x] **README.md 重写** - 反映当前 ACP 能力、缓存策略、权限与 UI 结构
+- [x] **遗留 mock 文案清理** - 清理代码和 UI 中残留的 mock backend 文案与注释
 
 ### 架构模块化 v1（新分支执行）
 
@@ -116,16 +126,13 @@
 
 ## 待开发功能
 
-- [ ] ACP 扩展认证方式（`env_var` / `terminal`）
-- [ ] 富文本输入细节打磨（token 删除手感、键盘导航、选区行为、移动端兼容）
-- [ ] 底部工具栏图标方案
-- [ ] README.md 重写
-- [ ] 清理残留 mock 文案和注释
+- 当前无待开发功能（截至 2026-04-14；Phase 6 已完成，进入待发布收尾）
 
 ---
 
 ## 最近完成
 
+- [x] Phase 6 最终项 - Agent Plan 显示协议验收与 UI 打磨完成，Phase 6 封板并进入待发布状态
 - [x] ACP 核心化重构 - 引入 `host/`、`acp/`、`core/` 边界并完成测试与文档同步
 - [x] UI/UX 文档更新 - 明确输入状态栏位置和功能
 - [x] Phase 0-4 全部完成
@@ -135,7 +142,7 @@
 ## 文档更新任务
 
 ### 必须更新
-- [ ] **README.md** - 完全重写，反映当前功能
+- [x] **README.md** - 完全重写，反映当前功能
 - [x] **02-progress.md** - 更新到最新进度
 
 ---
@@ -181,7 +188,7 @@
 | `@` 文件引用 | 已完成 | 输入 `@` 选择文件/文件夹 |
 | 输入状态栏 | 已完成 | 显示引用标签（位于输入框上方） |
 
-### UI-UX 优化（Phase 6 进行中）
+### UI-UX 优化（Phase 6 已完成）
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | LED 连接状态 | 已完成 | 首次打开和切换 agent 时正确显示，并随 ACP session 预热更新 |
@@ -192,12 +199,13 @@
 | / 命令功能完善 | 已完成 | `/clear`、`/help` 已可执行 |
 | / 命令测试脚本 | 已完成 | 已补单元测试 |
 | **ACP Slash Commands 动态支持** | 已完成 | `available_commands_update`、`input.hint`、Agent 命令插入与执行语义 |
-| **ACP client 能力补齐** | 部分完成 | 已补 `fs` 绝对路径适配、自动建目录、真实 permission 选择、`authenticate` 主链，并移除虚假的 `terminal: true`；UNSTABLE 扩展认证方式待补 |
+| **ACP client 能力补齐** | 已完成 | 已补 `fs` 绝对路径适配、自动建目录、真实 permission 选择、`authenticate` 主链，并移除虚假的 `terminal: true`；`env_var` / `terminal` UNSTABLE 认证项已移出 Phase 6 收口范围 |
+| **Agent Plan 协议验收与显示打磨** | 已完成 | 按官方 `agent-plan` 验收完整替换语义，补空列表清空路径，并统一状态/优先级显示可读性 |
 | **新对话预热建连** | 已完成 | 打开面板/新建对话时主动建立 ACP session，并同步刷新 LED、commands、config |
 | **ACP 连接缓存与过期回收** | 已完成 | 按 backend 复用 ACP adapter/连接，切换后立即预热，并支持 TTL 配置清理失活连接 |
 | **上下文 usage 指示器** | 已完成 | 仅在 ACP 返回 usage 数据时显示底部小饼图和悬停明细，无数据时隐藏 |
 | **registry agent 自身 icon 显示** | 已完成 | 已接入 registry icon 透传与已有 backend 自动回填 |
-| **移除 MockAdapter** | 部分完成 | 主流程已移除，仍有少量 mock 文案/注释待清理 |
+| **移除 MockAdapter** | 已完成 | 主流程与残留 mock 文案/注释已完成清理 |
 | 引用标签渲染 | 已完成 | 采用输入状态栏标签预览方案显示 `@` 与当前 `/command` |
 
 ### ACP 协议能力补齐（2026-04-10 文档复核）
@@ -237,4 +245,4 @@
 
 ---
 
-*最后更新: 2026-04-11*
+*最后更新: 2026-04-14*

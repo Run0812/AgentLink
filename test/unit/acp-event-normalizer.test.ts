@@ -31,6 +31,45 @@ describe('ACP event normalizer', () => {
 		});
 	});
 
+	it('normalizes plan updates with complete entries', () => {
+		expect(
+			normalizeSessionUpdate({
+				sessionUpdate: 'plan',
+				entries: [
+					{ content: 'Analyze codebase', priority: 'high', status: 'pending' },
+					{ content: 'Refactor module', priority: 'medium', status: 'in_progress' },
+				],
+			}),
+		).toEqual({
+			kind: 'plan',
+			entries: [
+				{ content: 'Analyze codebase', priority: 'high', status: 'pending' },
+				{ content: 'Refactor module', priority: 'medium', status: 'in_progress' },
+			],
+		});
+	});
+
+	it('normalizes empty plan updates', () => {
+		expect(
+			normalizeSessionUpdate({
+				sessionUpdate: 'plan',
+				entries: [],
+			}),
+		).toEqual({
+			kind: 'plan',
+			entries: [],
+		});
+	});
+
+	it('returns null for invalid plan payloads', () => {
+		expect(
+			normalizeSessionUpdate({
+				sessionUpdate: 'plan',
+				entries: [{ content: 'Missing status and priority' }],
+			}),
+		).toBeNull();
+	});
+
 	it('returns null for unsupported payloads', () => {
 		expect(normalizeSessionUpdate({ sessionUpdate: 'user_message_chunk' })).toBeNull();
 	});

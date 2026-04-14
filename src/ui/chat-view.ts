@@ -37,10 +37,12 @@ import { ChatSessionService } from '../core/chat-session-service';
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
 export class ChatView extends ItemView {
+	private static readonly SIDEBAR_MIN_WIDTH = '440px';
 	private static readonly TOOLBAR_BUTTON_MIN_WIDTH = '108px';
 	private static readonly TOOLBAR_BUTTON_MAX_WIDTH = '156px';
 	private static readonly TOOLBAR_DROPDOWN_MIN_WIDTH = '220px';
 	private static readonly TOOLBAR_DROPDOWN_MAX_WIDTH = 'min(280px, calc(100vw - 32px))';
+	private static readonly TOOLBAR_DROPDOWN_MAX_HEIGHT = '320px';
 
 	private adapter: AgentAdapter | null = null;
 	private session = new SessionStore();
@@ -114,6 +116,7 @@ export class ChatView extends ItemView {
 	private sessionConfig: SessionConfigState = { configOptions: [] };
 	private configButtonsContainer!: HTMLElement;
 	private planContainer!: HTMLElement;
+	private isPlanPanelExpanded = true;
 	private detachSessionStateListener?: () => void;
 	private globalDocumentListenerCleanup: Array<() => void> = [];
 
@@ -414,6 +417,11 @@ export class ChatView extends ItemView {
 	// ── UI construction ────────────────────────────────────────────────
 
 	private buildUI(container: HTMLElement): void {
+		const hostContainer = this.containerEl as HTMLElement;
+		hostContainer.style.minWidth = ChatView.SIDEBAR_MIN_WIDTH;
+		container.style.minWidth = ChatView.SIDEBAR_MIN_WIDTH;
+		container.style.boxSizing = 'border-box';
+
 		// Header
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
 		this.headerEl.style.width = '100%';
@@ -489,12 +497,6 @@ export class ChatView extends ItemView {
 		newChatBtn.addEventListener('mouseleave', () => newChatBtn.style.opacity = '0.7');
 		newChatBtn.addEventListener('click', () => this.createNewSession());
 
-		this.planContainer = container.createDiv({ cls: 'agentlink-session-plan' });
-		this.planContainer.style.display = 'none';
-		this.planContainer.style.padding = '0.45rem 0.6rem';
-		this.planContainer.style.borderBottom = '1px solid var(--background-modifier-border)';
-		this.planContainer.style.background = 'var(--background-secondary)';
-		
 		// Messages area
 		this.messagesEl = container.createDiv({ cls: 'agentlink-messages' });
 		this.messagesEl.style.flex = '1';
@@ -512,6 +514,21 @@ export class ChatView extends ItemView {
 		this.inputAreaContainer.style.position = 'relative';
 		this.inputAreaContainer.style.padding = '0.45rem 0.6rem 0.55rem';
 
+		// Plan popover (anchored above composer, similar to Copilot style)
+		this.planContainer = this.inputAreaContainer.createDiv({ cls: 'agentlink-session-plan-popover' });
+		this.planContainer.style.display = 'none';
+		this.planContainer.style.position = 'absolute';
+		this.planContainer.style.left = '0.6rem';
+		this.planContainer.style.right = '0.6rem';
+		this.planContainer.style.bottom = 'calc(100% + 0.35rem)';
+		this.planContainer.style.zIndex = '15';
+		this.planContainer.style.background = 'var(--background-primary)';
+		this.planContainer.style.border = '1px solid var(--background-modifier-border)';
+		this.planContainer.style.borderRadius = '8px';
+		this.planContainer.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.2)';
+		this.planContainer.style.padding = '0.45rem 0.55rem';
+		this.planContainer.style.overflow = 'hidden';
+
 		this.inputShell = this.inputAreaContainer.createDiv({ cls: 'agentlink-input-shell' });
 		this.inputShell.style.display = 'flex';
 		this.inputShell.style.flexDirection = 'column';
@@ -520,7 +537,9 @@ export class ChatView extends ItemView {
 		this.inputShell.style.background = 'var(--background-primary)';
 		this.inputShell.style.border = '1px solid var(--background-modifier-border)';
 		this.inputShell.style.borderRadius = '10px';
-		this.inputShell.style.overflow = 'hidden';
+		// Keep composer chrome clipped by border radius, but allow toolbar dropdowns
+		// (agent/model/config) to escape upward without being cut off by input shell.
+		this.inputShell.style.overflow = 'visible';
 		this.inputShell.style.boxShadow = '0 1px 0 rgba(255, 255, 255, 0.02)';
 		this.inputShell.addEventListener('click', (evt) => {
 			const target = evt.target;
@@ -667,6 +686,7 @@ export class ChatView extends ItemView {
 		modelContainer.style.position = 'relative';
 		this.modelSelectorBtn = modelContainer.createEl('button');
 		this.applyToolbarSelectorButtonStyle(this.modelSelectorBtn, 'var(--text-muted)');
+		this.modelSelectorBtn.addClass('agentlink-toolbar-ghost-btn');
 		this.modelSelectorBtn.style.display = 'none';
 		
 		const modelText = this.modelSelectorBtn.createEl('span', { text: 'Model' });
@@ -875,13 +895,8 @@ export class ChatView extends ItemView {
 		container.toggleClass('is-align-right', alignment === 'right');
 		container.style.minWidth = ChatView.TOOLBAR_DROPDOWN_MIN_WIDTH;
 		container.style.maxWidth = ChatView.TOOLBAR_DROPDOWN_MAX_WIDTH;
-		if (maxHeight) {
-			container.style.maxHeight = maxHeight;
-			container.style.overflowY = 'auto';
-		} else {
-			container.style.removeProperty('max-height');
-			container.style.overflowY = 'visible';
-		}
+		container.style.maxHeight = maxHeight ?? ChatView.TOOLBAR_DROPDOWN_MAX_HEIGHT;
+		container.style.overflowY = 'auto';
 	}
 
 	private applyToolbarDropdownHeaderStyle(header: HTMLElement): void {
@@ -1117,34 +1132,83 @@ export class ChatView extends ItemView {
 		titleRow.style.display = 'flex';
 		titleRow.style.alignItems = 'center';
 		titleRow.style.justifyContent = 'space-between';
-		titleRow.style.marginBottom = '0.25rem';
+		titleRow.style.gap = '0.45rem';
 
-		const title = titleRow.createEl('span', { text: 'Plan' });
-		title.style.fontSize = '0.72rem';
+		const leftGroup = titleRow.createDiv();
+		leftGroup.style.display = 'flex';
+		leftGroup.style.alignItems = 'center';
+		leftGroup.style.gap = '0.35rem';
+		leftGroup.style.minWidth = '0';
+
+		const title = leftGroup.createEl('span', { text: 'Plan' });
+		title.style.fontSize = '0.74rem';
 		title.style.fontWeight = '600';
+
+		const countBadge = leftGroup.createEl('span', { text: `${plan.length}` });
+		countBadge.style.fontSize = '0.66rem';
+		countBadge.style.color = 'var(--text-muted)';
+		countBadge.style.padding = '0.05rem 0.3rem';
+		countBadge.style.borderRadius = '999px';
+		countBadge.style.border = '1px solid var(--background-modifier-border)';
+
+		const rightGroup = titleRow.createDiv();
+		rightGroup.style.display = 'flex';
+		rightGroup.style.alignItems = 'center';
+		rightGroup.style.gap = '0.35rem';
+		rightGroup.style.flexShrink = '0';
 
 		const modeLabel = this.adapter?.getCurrentMode?.();
 		if (modeLabel) {
-			const modeBadge = titleRow.createEl('span', { text: modeLabel });
+			const modeBadge = rightGroup.createEl('span', { text: modeLabel });
 			modeBadge.style.fontSize = '0.68rem';
 			modeBadge.style.color = 'var(--text-muted)';
 		}
 
+		const toggleBtn = rightGroup.createEl('button');
+		toggleBtn.type = 'button';
+		toggleBtn.setAttribute('aria-label', this.isPlanPanelExpanded ? 'Collapse plan' : 'Expand plan');
+		toggleBtn.style.width = '22px';
+		toggleBtn.style.height = '22px';
+		toggleBtn.style.padding = '0';
+		toggleBtn.style.border = 'none';
+		toggleBtn.style.borderRadius = '4px';
+		toggleBtn.style.background = 'transparent';
+		toggleBtn.style.color = 'var(--text-muted)';
+		toggleBtn.style.cursor = 'pointer';
+		setIcon(toggleBtn, this.isPlanPanelExpanded ? 'chevron-down' : 'chevron-right');
+		toggleBtn.addEventListener('click', (evt) => {
+			evt.stopPropagation();
+			this.isPlanPanelExpanded = !this.isPlanPanelExpanded;
+			this.renderPlanPanel();
+		});
+
+		if (!this.isPlanPanelExpanded) {
+			return;
+		}
+
+		const list = this.planContainer.createDiv();
+		list.style.marginTop = '0.35rem';
+		list.style.maxHeight = 'min(300px, 38vh)';
+		list.style.overflowY = 'auto';
+		list.style.paddingRight = '0.1rem';
+
 		for (const entry of plan) {
-			this.renderPlanEntry(entry);
+			this.renderPlanEntry(list, entry);
 		}
 	}
 
-	private renderPlanEntry(entry: PlanEntry): void {
-		const row = this.planContainer.createDiv();
+	private renderPlanEntry(parent: HTMLElement, entry: PlanEntry): void {
+		const row = parent.createDiv();
 		row.style.display = 'flex';
 		row.style.alignItems = 'flex-start';
 		row.style.gap = '0.4rem';
-		row.style.padding = '0.15rem 0';
+		row.style.padding = '0.2rem 0';
 
-		const marker = row.createEl('span', { text: this.getPlanMarker(entry.status) });
+		const marker = row.createEl('span', { text: this.getPlanMarkerLabel(entry.status) });
 		marker.style.flexShrink = '0';
 		marker.style.color = this.getPlanColor(entry.status);
+		marker.style.fontFamily = 'var(--font-monospace)';
+		marker.style.fontSize = '0.68rem';
 
 		const content = row.createDiv();
 		content.style.minWidth = '0';
@@ -1154,6 +1218,7 @@ export class ChatView extends ItemView {
 		text.style.color = 'var(--text-normal)';
 
 		const meta = content.createEl('div', { text: `${entry.status} · ${entry.priority}` });
+		meta.setText(`${this.getPlanStatusLabel(entry.status)} | ${this.getPlanPriorityLabel(entry.priority)}`);
 		meta.style.fontSize = '0.68rem';
 		meta.style.color = 'var(--text-muted)';
 	}
@@ -1177,6 +1242,39 @@ export class ChatView extends ItemView {
 				return 'var(--color-orange)';
 			default:
 				return 'var(--text-faint)';
+		}
+	}
+
+	private getPlanMarkerLabel(status: PlanEntry['status']): string {
+		switch (status) {
+			case 'completed':
+				return '[x]';
+			case 'in_progress':
+				return '[~]';
+			default:
+				return '[ ]';
+		}
+	}
+
+	private getPlanStatusLabel(status: PlanEntry['status']): string {
+		switch (status) {
+			case 'in_progress':
+				return 'In progress';
+			case 'completed':
+				return 'Completed';
+			default:
+				return 'Pending';
+		}
+	}
+
+	private getPlanPriorityLabel(priority: PlanEntry['priority']): string {
+		switch (priority) {
+			case 'high':
+				return 'High priority';
+			case 'medium':
+				return 'Medium priority';
+			default:
+				return 'Low priority';
 		}
 	}
 
@@ -1623,11 +1721,10 @@ export class ChatView extends ItemView {
 			// Combine: builtin first, then agent
 			suggestions = [...builtinSuggestions, ...agentSuggestions];
 		} else if (trigger === 'mention') {
-			const activeFile = this.app.workspace.getActiveFile();
 			const files = this.contextService.searchFiles(query, 10);
 			const folders = this.contextService.searchFolders(query, 5);
 			suggestions = [
-				...createFileSuggestions(files, activeFile),
+				...createFileSuggestions(files),
 				...createFolderSuggestions(folders),
 			];
 		} else if (trigger === 'topic') {

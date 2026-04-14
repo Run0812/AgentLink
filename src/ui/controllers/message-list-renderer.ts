@@ -133,23 +133,28 @@ export class MessageListRenderer {
 
 		const header = container.createDiv({ cls: 'agentlink-thinking-header' });
 		const title = header.createDiv({ cls: 'agentlink-thinking-title' });
-		title.createSpan({ cls: 'agentlink-thinking-icon', text: '??' });
+		title.createSpan({ cls: 'agentlink-thinking-icon' });
 		title.createSpan({ text: 'Thinking' });
+		const thinkingIconEl = title.querySelector('.agentlink-thinking-icon');
+		if (thinkingIconEl instanceof HTMLElement) {
+			setIcon(thinkingIconEl, 'bot');
+		}
 		header.createSpan({ cls: 'agentlink-thinking-time', text: 'Thought process' });
-		const toggle = header.createSpan({ cls: 'agentlink-thinking-toggle', text: '▼' });
+		const toggle = header.createSpan({ cls: 'agentlink-thinking-toggle' });
 
 		const body = container.createDiv({ cls: 'agentlink-thinking-body' });
+		setIcon(toggle, 'chevron-down');
 		MarkdownRenderer.render(this.deps.app, content, body, '', this.deps.ownerComponent);
 
 		header.addEventListener('click', () => {
 			const isCollapsed = container.hasClass('agentlink-thinking-collapsed');
 			container.toggleClass('agentlink-thinking-collapsed', !isCollapsed);
-			toggle.setText(isCollapsed ? '▼' : '?');
+			setIcon(toggle, isCollapsed ? 'chevron-down' : 'chevron-right');
 		});
 
 		if (content.length > 300) {
 			container.addClass('agentlink-thinking-collapsed');
-			toggle.setText('?');
+			setIcon(toggle, 'chevron-right');
 		}
 	}
 

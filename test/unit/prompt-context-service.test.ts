@@ -24,8 +24,9 @@ describe('PromptContextService', () => {
 		await expect(service.capture()).resolves.toEqual({ selectedText: 'selected' });
 	});
 
-	it('falls back to the active file content', async () => {
+	it('does not implicitly include active file content', async () => {
 		const file = { path: 'note.md' } as never;
+		let readCalled = false;
 		const workspaceHost: WorkspaceHost = {
 			getActiveFile: () => file,
 			getActiveEditor: () => null,
@@ -33,7 +34,10 @@ describe('PromptContextService', () => {
 		};
 		const vaultHost: VaultHost = {
 			getAbstractFileByPath: () => null,
-			read: async (target) => (target === file ? '# note' : ''),
+			read: async () => {
+				readCalled = true;
+				return '# note';
+			},
 			create: () => Promise.resolve({} as never),
 			modify: () => Promise.resolve(),
 			createFolder: () => Promise.resolve(),
@@ -42,6 +46,7 @@ describe('PromptContextService', () => {
 		};
 
 		const service = new PromptContextService(workspaceHost, vaultHost);
-		await expect(service.capture()).resolves.toEqual({ fileContent: '# note' });
+		await expect(service.capture()).resolves.toEqual({});
+		expect(readCalled).toBe(false);
 	});
 });

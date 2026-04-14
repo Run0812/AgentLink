@@ -16,6 +16,7 @@
 - 主要间距范围控制在 `0.25rem - 0.6rem`
 - 主要文字尺寸控制在 `0.72rem - 0.9rem`
 - 输入区优先呈现为单一 composer shell，而不是多层分离面板
+- 保持简洁，减少非必要边框；仅在必要分割（层级/区域/滚动容器）时使用边框
 
 ---
 
@@ -86,6 +87,7 @@
 - `@` 引用文件夹
 - selection
 - 当前 `/command`
+- 不默认注入 `Current note`，仅在用户显式选择后加入引用
 
 **布局要求**
 - chip 必须属于输入框内部视觉区域
@@ -129,6 +131,7 @@
 - `Context usage`: 仅在 ACP 返回 usage 数据时显示
 - `Think`: 仅在 agent 提供多选时显示
 - `Send/Stop`: 右对齐
+- `Send/Stop` 颜色使用主题语义色（`interactive-accent` / `background-modifier-error`），不写死品牌色
 
 ---
 
@@ -167,6 +170,17 @@
 - 有数据时显示小饼图
 - 悬停显示详细 token/section 信息
 
+### 3.4 Agent Plan 面板
+
+- 数据源必须来自 ACP 聚合状态（adapter 的 `getPlan()` / `getCurrentMode()`），不直接消费 ACP 原始事件
+- 收到 `plan` 更新时，必须按协议以“完整列表替换”当前面板内容，不做增量拼接
+- 收到空 `entries` 时，面板必须立即隐藏，避免残留旧计划
+- 每条 plan 必须同时显示：
+  - 任务内容（content）
+  - 状态文本（Pending / In progress / Completed）
+  - 优先级文本（High / Medium / Low）
+- 状态标识必须可读，禁止乱码或不可识别符号
+
 ---
 
 ## 4. 消息显示
@@ -178,6 +192,9 @@
 | thinking | Thinking | 可折叠卡片 |
 | tool_call | Tool | 卡片状态 |
 | error | Error | 红色提示 |
+
+补充要求:
+- 用户消息气泡右对齐；agent（含 thinking）消息左对齐
 
 ---
 

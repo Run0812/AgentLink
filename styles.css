@@ -6,6 +6,7 @@
 	display: flex;
 	flex-direction: column;
 	height: 100%;
+	min-width: 440px;
 	overflow: hidden;
 	font-size: var(--font-ui-small);
 	user-select: text;
@@ -95,6 +96,7 @@
 .agentlink-message {
 	display: flex;
 	flex-direction: column;
+	align-items: flex-start;
 	gap: 4px;
 	max-width: 100%;
 }
@@ -127,6 +129,9 @@
 	background: var(--background-secondary);
 	border-radius: var(--radius-m);
 	padding: 8px 12px;
+	display: inline-block;
+	width: fit-content;
+	max-width: min(88%, 820px);
 	color: var(--text-normal);
 	line-height: 1.5;
 	word-break: break-word;
@@ -134,9 +139,18 @@
 	-webkit-user-select: text;
 }
 
+.agentlink-message-user {
+	align-items: flex-end;
+}
+
+.agentlink-message-user .agentlink-message-header {
+	justify-content: flex-end;
+}
+
 .agentlink-message-user .agentlink-message-content {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
+	margin-left: auto;
 }
 
 .agentlink-error-content {
@@ -190,7 +204,7 @@
 	justify-content: center;
 	padding: 2px 6px;
 	background: transparent;
-	border: 1px solid var(--background-modifier-border);
+	border: none;
 	border-radius: var(--radius-s);
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
@@ -325,13 +339,28 @@
 	font-size: 0.75rem;
 }
 
-.agentlink-compact-send-btn {
+.agentlink-container .agentlink-compact-send-btn {
 	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
 	font-weight: 500;
 }
 
-.agentlink-compact-stop-btn {
+.agentlink-container .agentlink-compact-stop-btn {
 	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	border: none;
+}
+
+.agentlink-toolbar-ghost-btn {
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+.agentlink-toolbar-ghost-btn:hover,
+.agentlink-toolbar-ghost-btn:focus-visible {
+	background: var(--background-modifier-hover) !important;
 }
 
 .agentlink-toolbar-selector-btn {
@@ -407,7 +436,21 @@
 .agentlink-toolbar-dropdown-item {
 	width: 100%;
 	box-sizing: border-box;
+	height: 34px;
+	min-height: 34px;
 	overflow: hidden;
+	border: none !important;
+	box-shadow: none !important;
+	outline: none !important;
+	background: transparent;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	line-height: 1.3;
+}
+
+.agentlink-toolbar-dropdown-item:hover,
+.agentlink-toolbar-dropdown-item:focus-visible {
+	background: var(--background-modifier-hover);
 }
 
 .agentlink-single-line-ellipsis {
@@ -468,28 +511,27 @@
 }
 
 .agentlink-thinking-content {
-	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
-	border-left: 3px solid var(--text-muted);
-	border-radius: var(--radius-m);
+	background: transparent;
+	border: none;
+	border-radius: 0;
 	padding: 0;
-	overflow: hidden;
-	margin-bottom: 8px;
+	overflow: visible;
+	margin: 2px 0 8px;
 }
 
 .agentlink-thinking-header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 8px 12px;
-	background: var(--background-secondary);
-	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 6px 4px 4px;
+	background: transparent;
+	border-bottom: none;
 	cursor: pointer;
 	transition: background 0.15s;
 }
 
 .agentlink-thinking-header:hover {
-	background: var(--background-modifier-hover);
+	background: transparent;
 }
 
 .agentlink-thinking-title {
@@ -497,12 +539,25 @@
 	align-items: center;
 	gap: 6px;
 	font-size: var(--font-ui-small);
+	line-height: 1.2;
 	color: var(--text-muted);
 	font-weight: 500;
 }
 
 .agentlink-thinking-icon {
-	font-size: 14px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.agentlink-thinking-icon svg {
+	display: block;
+	width: 14px;
+	height: 14px;
 }
 
 .agentlink-thinking-time {
@@ -515,15 +570,13 @@
 .agentlink-thinking-toggle {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
-	transition: transform 0.2s;
-}
-
-.agentlink-thinking-collapsed .agentlink-thinking-toggle {
-	transform: rotate(-90deg);
+	transition: color 0.2s;
 }
 
 .agentlink-thinking-body {
-	padding: 12px 16px;
+	margin: 0 0 0 6px;
+	padding: 6px 0 6px 10px;
+	border-left: 2px solid var(--background-modifier-border);
 	max-height: 600px;
 	overflow-y: auto;
 	transition: max-height 0.3s ease, padding 0.3s ease;
@@ -534,7 +587,7 @@
 
 .agentlink-thinking-collapsed .agentlink-thinking-body {
 	max-height: 0;
-	padding: 0 16px;
+	padding: 0 0 0 10px;
 	overflow: hidden;
 }
 

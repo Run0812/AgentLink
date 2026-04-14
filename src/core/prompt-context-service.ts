@@ -18,16 +18,8 @@ export class PromptContextService {
 			return { selectedText };
 		}
 
-		const activeFile = this.workspaceHost.getActiveFile();
-		if (!activeFile) {
-			return {};
-		}
-
-		try {
-			const fileContent = await this.vaultHost.read(activeFile);
-			return fileContent ? { fileContent } : {};
-		} catch {
-			return {};
-		}
+		// Do not implicitly attach active file content.
+		// Context file inclusion must come from explicit @ attachments only.
+		return {};
 	}
 }

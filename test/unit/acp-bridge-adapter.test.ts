@@ -271,6 +271,36 @@ describe('AcpBridgeAdapter', () => {
 			expect(listener).toHaveBeenCalledTimes(1);
 		});
 
+		it('replaces the entire plan on each plan update', () => {
+			adapter.handlePlan([
+				{ content: 'Step 1', priority: 'high', status: 'pending' },
+				{ content: 'Step 2', priority: 'medium', status: 'in_progress' },
+			]);
+			expect(adapter.getPlan()).toEqual([
+				{ content: 'Step 1', priority: 'high', status: 'pending' },
+				{ content: 'Step 2', priority: 'medium', status: 'in_progress' },
+			]);
+
+			adapter.handlePlan([
+				{ content: 'Step 2', priority: 'medium', status: 'completed' },
+				{ content: 'Step 3', priority: 'low', status: 'pending' },
+			]);
+			expect(adapter.getPlan()).toEqual([
+				{ content: 'Step 2', priority: 'medium', status: 'completed' },
+				{ content: 'Step 3', priority: 'low', status: 'pending' },
+			]);
+		});
+
+		it('clears the plan when receiving an empty plan update', () => {
+			adapter.handlePlan([
+				{ content: 'Temporary step', priority: 'high', status: 'in_progress' },
+			]);
+			expect(adapter.getPlan()).toHaveLength(1);
+
+			adapter.handlePlan([]);
+			expect(adapter.getPlan()).toEqual([]);
+		});
+
 		it('waits for an in-flight prepareSession before sending the first prompt', async () => {
 			const prompt = vi.fn().mockResolvedValue({ stopReason: 'end_turn' });
 			const internal = adapter as unknown as {

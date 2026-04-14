@@ -416,33 +416,16 @@ export function createSkillSuggestions(skills: Skill[]): SuggestionItem[] {
 
 /**
  * 创建文件建议项（紧凑版）
- * @param files - 文件列表
- * @param currentFile - 当前活动文件（可选，用于添加 "Current note" 选项）
+ * 仅展示显式可选文件，不默认注入 "Current note"
  */
-export function createFileSuggestions(files: TFile[], currentFile?: TFile | null): SuggestionItem[] {
-	const suggestions: SuggestionItem[] = [];
-	
-	// Add "Current note" option if there's an active file
-	if (currentFile) {
-		suggestions.push({
-			id: 'current_note',
-			label: 'Current note',
-			description: currentFile.path,
-			icon: '📄',
-			data: { type: 'current_note', file: currentFile },
-		});
-	}
-	
-	// Add regular files
-	suggestions.push(...files.map(file => ({
+export function createFileSuggestions(files: TFile[]): SuggestionItem[] {
+	return files.map(file => ({
 		id: `file_${file.path}`,
 		label: file.name,
 		description: file.path,
 		icon: '📄',
 		data: { type: 'file', file },
-	})));
-	
-	return suggestions;
+	}));
 }
 
 /**
