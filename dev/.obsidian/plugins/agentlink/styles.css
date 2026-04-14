@@ -185,6 +185,9 @@
 }
 
 .agentlink-copy-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	padding: 2px 6px;
 	background: transparent;
 	border: 1px solid var(--background-modifier-border);
@@ -204,6 +207,11 @@
 
 .agentlink-message:hover .agentlink-copy-btn {
 	opacity: 0.8;
+}
+
+.agentlink-copy-btn svg {
+	width: 14px;
+	height: 14px;
 }
 
 /* ── Error message ───────────────────────────────────────────────────────── */

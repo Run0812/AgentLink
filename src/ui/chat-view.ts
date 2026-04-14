@@ -733,7 +733,7 @@ export class ChatView extends ItemView {
 		this.contextUsageTooltip.style.display = 'none';
 		this.contextUsageTooltip.style.position = 'absolute';
 		this.contextUsageTooltip.style.bottom = '100%';
-		this.contextUsageTooltip.style.left = '0';
+		this.contextUsageTooltip.style.right = '0';
 		this.contextUsageTooltip.style.zIndex = '1000';
 		this.contextUsageTooltip.style.minWidth = '220px';
 		this.contextUsageTooltip.style.maxWidth = '280px';
@@ -768,9 +768,17 @@ export class ChatView extends ItemView {
 		this.configButtonsContainer.style.gap = '0.3rem';
 		this.configButtonsContainer.style.flex = '1';
 		
+		const actionControls = this.bottomToolbar.createDiv();
+		actionControls.style.marginLeft = 'auto';
+		actionControls.style.display = 'flex';
+		actionControls.style.alignItems = 'center';
+		actionControls.style.gap = '0.35rem';
+		actionControls.appendChild(contextUsageContainer);
+		
 		// Right: Send/Stop button
-		const sendBtnContainer = this.bottomToolbar.createDiv();
-		sendBtnContainer.style.marginLeft = 'auto';
+		const sendBtnContainer = actionControls.createDiv();
+		sendBtnContainer.style.display = 'flex';
+		sendBtnContainer.style.alignItems = 'center';
 		
 		this.sendBtn = sendBtnContainer.createEl('button', { text: 'Send' });
 		this.sendBtn.addClass('agentlink-compact-send-btn');
