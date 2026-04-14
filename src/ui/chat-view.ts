@@ -37,6 +37,7 @@ import { ChatSessionService } from '../core/chat-session-service';
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
 export class ChatView extends ItemView {
+	private static readonly SIDEBAR_MIN_WIDTH = '440px';
 	private static readonly TOOLBAR_BUTTON_MIN_WIDTH = '108px';
 	private static readonly TOOLBAR_BUTTON_MAX_WIDTH = '156px';
 	private static readonly TOOLBAR_DROPDOWN_MIN_WIDTH = '220px';
@@ -416,6 +417,11 @@ export class ChatView extends ItemView {
 	// ── UI construction ────────────────────────────────────────────────
 
 	private buildUI(container: HTMLElement): void {
+		const hostContainer = this.containerEl as HTMLElement;
+		hostContainer.style.minWidth = ChatView.SIDEBAR_MIN_WIDTH;
+		container.style.minWidth = ChatView.SIDEBAR_MIN_WIDTH;
+		container.style.boxSizing = 'border-box';
+
 		// Header
 		this.headerEl = container.createDiv({ cls: 'agentlink-header' });
 		this.headerEl.style.width = '100%';
