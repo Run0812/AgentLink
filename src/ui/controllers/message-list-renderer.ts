@@ -1,4 +1,4 @@
-import { App, Component, MarkdownRenderer } from 'obsidian';
+import { App, Component, MarkdownRenderer, setIcon } from 'obsidian';
 import { ChatMessage, MessageRole } from '../../core/types';
 
 export interface MessageListRendererDeps {
@@ -54,7 +54,7 @@ export class MessageListRenderer {
 				cls: 'agentlink-copy-btn',
 				attr: { 'aria-label': 'Copy message', title: 'Copy message' },
 			});
-			copyBtn.innerHTML = '??';
+			setIcon(copyBtn, 'copy');
 			copyBtn.addEventListener('click', () => {
 				void this.deps.onCopyMessage(msg);
 			});

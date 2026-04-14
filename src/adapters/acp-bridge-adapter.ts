@@ -36,6 +36,13 @@ import {
 import { AcpTransport } from './acp/acp-transport';
 import { AcpProtocolMapper } from './acp/acp-protocol-mapper';
 import { AcpSessionState } from './acp/acp-session-state';
+import { DEFAULT_COMPATIBILITY_PROFILE, type CompatibilityProfile } from '../acp/acp-compatibility-profile';
+import {
+	normalizePermissionToolCall,
+	normalizeSessionUpdate,
+	type NormalizedAcpEvent,
+} from '../acp/acp-event-normalizer';
+import { AcpTurnStateMachine } from '../acp/acp-turn-state-machine';
 
 // ============================================================================
 // Adapter Configuration (using shared types)
@@ -90,74 +97,13 @@ class AgentLinkAcpClient implements acp.Client {
 	async sessionUpdate(params: acp.SessionNotification): Promise<void> {
 		const update = params.update;
 		console.log('[ACP Client] sessionUpdate:', update.sessionUpdate);
-
-			switch (update.sessionUpdate) {
-			case 'agent_message_chunk':
-				if (update.content.type === 'text' && update.content.text) {
-					console.log('[ACP Client] Agent message:', update.content.text.substring(0, 100));
-					this.adapter.handleAgentMessage(update.content.text);
-				}
-				break;
-
-			case 'agent_thought_chunk': {
-				// agent_thought_chunk content is also a ContentBlock
-				// TextContent has type 'text', not 'thinking'
-				const text = update.content.type === 'text' ? update.content.text : null;
-				if (text) {
-					console.log('[ACP Client] Agent thinking:', text.substring(0, 100));
-					this.adapter.handleAgentThinking(text);
-				}
-				break;
-			}
-
-			case 'tool_call':
-				console.log('[ACP Client] Tool call:', update.toolCallId, update.title, update.status);
-				this.adapter.handleToolCall(update);
-				break;
-
-			case 'tool_call_update':
-				console.log('[ACP Client] Tool call update:', update.toolCallId, update.status);
-				if (update.content && update.content.length > 0) {
-					for (const block of update.content) {
-						if (block.type === 'content' && block.content?.type === 'text') {
-							this.adapter.handleToolResult(update.toolCallId, block.content.text);
-						}
-					}
-				}
-				break;
-
-			case 'plan':
-				console.log('[ACP Client] Plan update with', update.entries?.length, 'entries');
-				this.adapter.handlePlan(update.entries);
-				break;
-
-			case 'available_commands_update':
-				console.log('[ACP Client] Available commands update:', update.availableCommands?.length ?? 0);
-				this.adapter.handleAvailableCommands(update.availableCommands);
-				break;
-
-			case 'current_mode_update':
-				console.log('[ACP Client] Current mode update:', update.currentModeId);
-				this.adapter.handleCurrentModeUpdate(update.currentModeId);
-				break;
-
-			case 'config_option_update':
-				console.log('[ACP Client] Config option update:', update.configOptions?.length ?? 0);
-				this.adapter.handleConfigOptionUpdate(update.configOptions);
-				break;
-
-			case 'usage_update':
-				console.log('[ACP Client] Usage update received');
-				this.adapter.handleContextUsageUpdate(update as unknown);
-				break;
-
-			case 'user_message_chunk':
-				console.log('[ACP Client] User message echo');
-				break;
-
-			default:
-				console.log('[ACP Client] Unknown update type:', (update as any).sessionUpdate);
+		const normalized = normalizeSessionUpdate(update);
+		if (!normalized) {
+			console.log('[ACP Client] Ignoring unrecognized update payload');
+			return;
 		}
+
+		this.adapter.handleNormalizedEvent(normalized);
 	}
 
 	/**
@@ -292,7 +238,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private transport = new AcpTransport();
 	private protocolMapper = new AcpProtocolMapper();
 	private sessionState = new AcpSessionState();
+	private turnState = new AcpTurnStateMachine();
 	private callbacks: AcpAdapterCallbacks = {};
+	private compatibilityProfile: CompatibilityProfile = DEFAULT_COMPATIBILITY_PROFILE;
 	
 	// SDK 连接
 	private connection: acp.ClientSideConnection | null = null;
@@ -309,6 +257,7 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	private responseBuffer: string[] = [];
 	private thinkingBuffer: string[] = [];
 	private onThinkingChunk?: (text: string) => void;
+	private currentTurnId: string | null = null;
 
 	// Backward-compatible field access used by existing tests/internal callers.
 	private get sessionId(): string | null {
@@ -467,6 +416,9 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			throw new ConnectionError('Connection or session not established');
 		}
 
+		const turnId = this.turnState.startTurn();
+		this.currentTurnId = turnId;
+		this.turnState.markRunning(turnId);
 		this.setState('busy');
 		this.currentHandlers = handlers;
 		this.responseBuffer = [];
@@ -505,15 +457,20 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			console.log('[ACP Adapter] Stop reason:', response.stopReason);
 			this.handlePromptUsage(response as unknown);
 
-			// 发送完整的响应
-			const fullText = this.responseBuffer.join('');
-			console.log('[ACP Adapter] Full response length:', fullText.length);
-			
 			this.setState('connected');
-			handlers.onComplete(fullText || '(No response)');
+			if (response.stopReason === 'cancelled') {
+				this.turnState.completeTurn(turnId);
+				handlers.onError(new CancellationError());
+			} else {
+				const fullText = this.responseBuffer.join('');
+				console.log('[ACP Adapter] Full response length:', fullText.length);
+				this.turnState.completeTurn(turnId);
+				handlers.onComplete(fullText || '(No response)');
+			}
 
 		} catch (error) {
 			this.setState('connected');
+			this.turnState.failTurn(turnId, error instanceof Error ? error.message : String(error));
 			console.error('[ACP Adapter] Send message failed:', error);
 			
 			if (error instanceof CancellationError) {
@@ -524,12 +481,14 @@ export class AcpBridgeAdapter implements AgentAdapter {
 			}
 		} finally {
 			this.currentHandlers = null;
+			this.currentTurnId = null;
 			console.log('[ACP Adapter] ========================================');
 		}
 	}
 
 	async cancel(): Promise<void> {
 		console.log('[ACP Adapter] Cancel requested');
+		this.turnState.beginCancellation();
 		
 		if (this.connection && this.sessionState.sessionId) {
 			try {
@@ -690,11 +649,11 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	async handlePermissionRequest(
 		params: acp.RequestPermissionRequest,
 	): Promise<acp.RequestPermissionResponse> {
-		if (params.options.length === 0) {
+		if (params.options.length === 0 || this.turnState.getState().kind === 'cancelling') {
 			return { outcome: { outcome: 'cancelled' } };
 		}
 
-		const toolCall = this.mapPermissionToolCall(params.toolCall);
+		const toolCall = normalizePermissionToolCall(params.toolCall);
 		const selectedOptionId = await this.requestPermissionSelection(toolCall, params.options);
 		if (!selectedOptionId) {
 			console.log('[ACP Adapter] Permission request cancelled');
@@ -711,6 +670,46 @@ export class AcpBridgeAdapter implements AgentAdapter {
 	}
 
 	// ── Internal Methods (called by AgentLinkAcpClient) ──────────────────────
+
+	handleNormalizedEvent(event: NormalizedAcpEvent): void {
+		switch (event.kind) {
+			case 'message_chunk':
+				if (this.turnState.canAcceptTurnBoundUpdates()) {
+					this.handleAgentMessage(event.text);
+				}
+				return;
+			case 'thinking_chunk':
+				if (this.turnState.canAcceptTurnBoundUpdates()) {
+					this.handleAgentThinking(event.text);
+				}
+				return;
+			case 'tool_call':
+				if (this.turnState.canAcceptTurnBoundUpdates()) {
+					this.handleToolCall(event);
+				}
+				return;
+			case 'tool_call_update':
+				if (this.turnState.canAcceptTurnBoundUpdates()) {
+					this.handleToolResult(event);
+				}
+				return;
+			case 'plan':
+				this.handlePlan(event.entries);
+				return;
+			case 'available_commands':
+				this.handleAvailableCommands(event.commands);
+				return;
+			case 'current_mode':
+				this.handleCurrentModeUpdate(event.modeId);
+				return;
+			case 'config_options':
+				this.handleConfigOptionUpdate(event.configOptions);
+				return;
+			case 'usage':
+				this.handleContextUsageUpdate(event.raw);
+				return;
+		}
+	}
 
 	handleAgentMessage(text: string): void {
 		console.log('[ACP Adapter] handleAgentMessage:', text.substring(0, 50));
@@ -729,12 +728,12 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		}
 	}
 
-	handleToolCall(update: acp.ToolCallUpdate): void {
-		console.log('[ACP Adapter] handleToolCall:', (update as any).toolCallId, (update as any).title, (update as any).status);
+	handleToolCall(update: Extract<NormalizedAcpEvent, { kind: 'tool_call' }>): void {
+		console.log('[ACP Adapter] handleToolCall:', update.toolCallId, update.title, update.status);
 		
 		// Map ACP status to our status type
 		let status: 'pending' | 'executing' | 'completed' | 'error';
-		switch ((update as any).status) {
+		switch (update.status) {
 			case 'in_progress':
 				status = 'executing';
 				break;
@@ -748,27 +747,15 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				status = 'pending';
 		}
 		
-		// Try to parse params from the update
-		let params: Record<string, unknown> = {};
-		const updateAny = update as any;
-		if (updateAny.arguments || updateAny.params) {
-			const rawParams = updateAny.arguments || updateAny.params;
-			try {
-				params = typeof rawParams === 'string' 
-					? JSON.parse(rawParams) 
-					: rawParams;
-			} catch {
-				params = { raw: rawParams };
-			}
-		}
+		this.turnState.registerToolCall(this.currentTurnId ?? 'unknown-turn', update.toolCallId, update.tool);
 		
 		// Call the handler to display as a card in UI
 		if (this.currentHandlers?.onToolCall) {
-			this.currentHandlers.onToolCall(updateAny.tool || updateAny.toolName || 'unknown', params, status);
+			this.currentHandlers.onToolCall(update.tool, update.params, status);
 		} else {
 			// Fallback: show as text if no card handler
-			if ((update as any).status === 'in_progress') {
-				const toolMsg = `🔍 **${(update as any).title}**...\n\n`;
+			if (update.status === 'in_progress') {
+				const toolMsg = `🔍 **${update.title}**...\n\n`;
 				this.responseBuffer.push(toolMsg);
 				if (this.currentHandlers) {
 					this.currentHandlers.onChunk(toolMsg);
@@ -777,8 +764,10 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		}
 	}
 
-	handleToolResult(toolCallId: string, text: string): void {
-		console.log('[ACP Adapter] handleToolResult:', toolCallId);
+	handleToolResult(update: Extract<NormalizedAcpEvent, { kind: 'tool_call_update' }>): void {
+		console.log('[ACP Adapter] handleToolResult:', update.toolCallId);
+		this.turnState.updateToolCall(this.currentTurnId ?? 'unknown-turn', update.toolCallId, update.status);
+		const text = update.texts.join('');
 		// Don't output raw tool results - they should be handled by the agent and included in its response
 		// If the agent doesn't include the result in its response, we can optionally show a summary
 		try {
@@ -1260,9 +1249,18 @@ export class AcpBridgeAdapter implements AgentAdapter {
 		toolCall: { id: string; tool: string; params: Record<string, unknown>; title: string },
 		options: Array<{ optionId: string; name: string; kind: string }>,
 	): Promise<string | null> {
+		if (this.turnState.getState().kind === 'cancelling') {
+			return null;
+		}
+
 		if (this.callbacks.onPermissionRequest) {
 			return new Promise((resolve) => {
+				const unregisterCancel = this.turnState.registerPendingPermission(() => {
+					unregisterCancel();
+					resolve(null);
+				});
 				this.callbacks.onPermissionRequest?.(toolCall, options, (outcome) => {
+					unregisterCancel();
 					resolve(outcome.approved ? outcome.optionId ?? null : null);
 				});
 			});
@@ -1284,11 +1282,17 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 		return new Promise((resolve) => {
 			let settled = false;
+			let modal: { close: () => void; open: () => void } | null = null;
+			const unregisterCancel = this.turnState.registerPendingPermission(() => {
+				modal?.close();
+				finish(null);
+			});
 			const finish = (selectedOptionId: string | null): void => {
 				if (settled) {
 					return;
 				}
 				settled = true;
+				unregisterCancel();
 				resolve(selectedOptionId);
 			};
 
@@ -1334,7 +1338,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 				}
 			}
 
-			new PermissionModal(app).open();
+			modal = new PermissionModal(app);
+			modal.open();
 		});
 	}
 
@@ -1414,6 +1419,8 @@ export class AcpBridgeAdapter implements AgentAdapter {
 
 	private resetSessionState(): void {
 		this.sessionState.reset();
+		this.turnState.reset();
+		this.currentTurnId = null;
 	}
 
 	private emitSessionStateChange(): void {

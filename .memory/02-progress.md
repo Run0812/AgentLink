@@ -9,6 +9,42 @@
 
 ---
 
+## 2026-04-14 - ACP 核心化重构：引入 host/acp/core 边界并同步文档
+
+**实现范围**:
+- 新分支 `codex/acp-core-refactor`
+- 渐进重构，不改变主流程行为
+- 文档与测试同步收口
+
+**完成内容**:
+- 新增 `src/host/obsidian/*` 与 `src/host/terminal/*`，收敛 vault / workspace / notice / terminal 副作用
+- 新增 `src/core/prompt-context-service.ts`、`src/core/chat-turn-service.ts`、`src/core/chat-session-service.ts`
+- 新增 `src/acp/*`，补上 ACP 事件 schema、normalizer、turn state machine、compatibility profile
+- `AcpBridgeAdapter` 改为通过 ACP normalizer 处理 `session/update`，并补上 cancel / pending permission / stale turn 收敛
+- `ChatView` 改为委托 `core` 服务，不再直接依赖 `AcpBridgeAdapter` 具体类型
+- 同步更新 `AGENTS.md`、`.memory/01-05`、`Doc/Developer-Guide.md`、`README.md`
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test` 通过（14 files, 111 tests）
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/host/`
+- `src/acp/`
+- `src/core/chat-*.ts`
+- `src/ui/chat-view.ts`
+- `AGENTS.md`
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+- `.memory/03-bugs.md`
+- `.memory/04-testing.md`
+- `.memory/05-ui-ux.md`
+- `Doc/Developer-Guide.md`
+- `README.md`
+
+---
+
 ## 2026-04-14 - README 收敛为产品定位入口，并新增开发者文档索引
 
 **实现范围**:

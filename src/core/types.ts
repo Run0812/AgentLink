@@ -510,6 +510,8 @@ export interface AgentAdapter {
 	prepareSession?(options?: { reset?: boolean }): Promise<void>;
 	/** Return context window usage information when available. */
 	getContextUsage?(): ContextUsageState | null;
+	/** Subscribe to session-level state changes for config/plan/usage refresh. */
+	subscribeSessionState?(listener: () => void): () => void;
 	
 	/** 
 	 * Get available skills from the agent.

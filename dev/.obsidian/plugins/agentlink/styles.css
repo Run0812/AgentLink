@@ -185,6 +185,9 @@
 }
 
 .agentlink-copy-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	padding: 2px 6px;
 	background: transparent;
 	border: 1px solid var(--background-modifier-border);
@@ -204,6 +207,11 @@
 
 .agentlink-message:hover .agentlink-copy-btn {
 	opacity: 0.8;
+}
+
+.agentlink-copy-btn svg {
+	width: 14px;
+	height: 14px;
 }
 
 /* ── Error message ───────────────────────────────────────────────────────── */
@@ -303,6 +311,127 @@
 
 .agentlink-stop-btn:hover {
 	opacity: 0.85;
+}
+
+/* Compact toolbar/button styles extracted from ChatView inline assignments */
+.agentlink-compact-send-btn,
+.agentlink-compact-stop-btn {
+	padding: 0.25rem 1rem;
+	height: 24px;
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.75rem;
+}
+
+.agentlink-compact-send-btn {
+	background: var(--interactive-accent);
+	font-weight: 500;
+}
+
+.agentlink-compact-stop-btn {
+	background: var(--background-modifier-error);
+}
+
+.agentlink-toolbar-selector-btn {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.25rem;
+	height: 24px;
+	padding: 0.25rem 0.45rem;
+	box-sizing: border-box;
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.75rem;
+	color: var(--agentlink-toolbar-selector-color, var(--text-muted));
+	white-space: nowrap;
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.agentlink-header-action-btn {
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	cursor: pointer;
+	opacity: 0.7;
+	color: var(--text-muted);
+}
+
+.agentlink-toolbar-dropdown {
+	display: block;
+	position: absolute;
+	bottom: 100%;
+	z-index: 1000;
+	box-sizing: border-box;
+	padding: 0.3rem;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+	margin-bottom: 0.3rem;
+	overflow-x: hidden;
+}
+
+.agentlink-toolbar-dropdown.is-align-left {
+	left: 0;
+	right: auto;
+}
+
+.agentlink-toolbar-dropdown.is-align-right {
+	right: 0;
+	left: auto;
+}
+
+.agentlink-toolbar-dropdown-header {
+	font-size: 0.7rem;
+	color: var(--text-muted);
+	padding: 0.25rem 0.4rem;
+	margin-bottom: 0.2rem;
+	border-bottom: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.agentlink-toolbar-dropdown-item {
+	width: 100%;
+	box-sizing: border-box;
+	overflow: hidden;
+}
+
+.agentlink-single-line-ellipsis {
+	min-width: 0;
+	font-size: var(--agentlink-ellipsis-font-size, 0.75rem);
+	line-height: 1.3;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--agentlink-ellipsis-color, inherit);
+}
+
+.agentlink-file-picker-item {
+	width: 100%;
+	text-align: left;
+	padding: 0.25rem 0.4rem;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+	font-size: 0.8rem;
+}
+
+.agentlink-file-picker-item.is-hover {
+	background: var(--background-modifier-hover);
 }
 
 /* ── Status bar ──────────────────────────────────────────────────────────── */

@@ -194,7 +194,10 @@
 - 当前输入区已切换为 `contenteditable` inline token composer
 - `@` 引用和 `/command` 以原子 token 节点插入到文字流中
 - 现阶段优先保证 inline token、自动完成、发送链路稳定，不引入完整第三方富文本编辑器
+- ChatView 负责视图生命周期、渲染与动作转发；发送、取消、工具确认、文件应用与会话切换应优先委托给 `core/` 服务
+- plan / mode / config / usage 必须来自 ACP 聚合后的状态，不直接消费 ACP 原始事件
+- Obsidian / Node 副作用优先经由 `host/` 边界进入业务层
 
 ---
 
-*最后更新: 2026-04-11*
+*最后更新: 2026-04-14*

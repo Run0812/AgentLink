@@ -12,6 +12,13 @@
 3. 阅读 `04-testing.md` 了解如何测试新功能
 4. 开发完成后更新 `02-progress.md` 记录进度
 
+### 架构调整类任务
+
+1. 先阅读 `01-tasks.md`、`04-testing.md`、`05-ui-ux.md`
+2. 先确认当前实现，再决定是否需要新增 `host/`、`acp/`、`core/` 边界
+3. 优先做渐进重构，不做一次性推倒重写
+4. 架构或协议变更完成后，必须同步更新 `.memory/` 和 `Doc/`
+
 ### 修复 Bug
 
 1. 在 `03-bugs.md` 中查找是否有相关记录
@@ -68,6 +75,11 @@ npm install @agentclientprotocol/sdk
 3.  Dev或Debug模式下所有ACP通信必须输出到 Console
 4. 禁止手写 ACP 协议
 5.  使用 SDK 的标准流程
+6.  UI 层保持 **Preact**，不要切换到 React
+7.  业务判断优先走 capability / metadata，不要写厂商名分支
+8.  ACP 原始事件必须先校验、归一化、聚合，再进入 UI
+9.  Obsidian API 的副作用优先收敛到 `host/`，不要散落到业务层
+10.  ChatView 只负责视图生命周期、渲染和动作转发
 
 ---
 
@@ -230,6 +242,14 @@ npm install @agentclientprotocol/sdk
 
 ## 快速参考
 
+### 当前架构约束
+
+- `main.ts` 负责插件生命周期与依赖装配
+- `host/` 负责 Obsidian / Node 副作用边界
+- `acp/` 负责 ACP schema、事件归一化、turn 状态与兼容层
+- `core/` 负责会话、发送、取消、应用结果等业务用例
+- `ui/` 负责 Preact / Obsidian 视图渲染，不直接解析 ACP 原始事件
+
 ### 文件对应关系
 
 | 需求 | 查阅文档 |
@@ -250,4 +270,4 @@ npm install @agentclientprotocol/sdk
 
 ---
 
-*本文档最后更新: 2026-04-09*
+*本文档最后更新: 2026-04-14*

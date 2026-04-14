@@ -1,19 +1,30 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ToolExecutor, ToolExecutorConfig } from '../../src/services/tool-executor';
 import { ToolCall, ToolType } from '../../src/core/types';
+import type { VaultHost } from '../../src/host/obsidian/vault-host';
+import type { TerminalHost } from '../../src/host/terminal/node-terminal-host';
 
-// Mock Obsidian App
-const createMockApp = () => ({
-	vault: {
-		getAbstractFileByPath: () => null,
-		read: () => Promise.resolve(''),
-		create: () => Promise.resolve({}),
-	},
+const createMockVaultHost = (): VaultHost => ({
+	getAbstractFileByPath: () => null,
+	read: () => Promise.resolve(''),
+	create: () => Promise.resolve({} as never),
+	modify: () => Promise.resolve(),
+	createFolder: () => Promise.resolve(),
+	getFiles: () => [],
+	getAllLoadedFiles: () => [],
+});
+
+const createMockTerminalHost = (): TerminalHost => ({
+	execute: () => Promise.resolve({
+		success: true,
+		content: 'hello',
+	}),
 });
 
 describe('ToolExecutor', () => {
 	let executor: ToolExecutor;
-	let mockApp: ReturnType<typeof createMockApp>;
+	let mockVaultHost: VaultHost;
+	let mockTerminalHost: TerminalHost;
 
 	const defaultConfig: ToolExecutorConfig = {
 		workspaceRoot: '/test',
@@ -24,8 +35,9 @@ describe('ToolExecutor', () => {
 	};
 
 	beforeEach(() => {
-		mockApp = createMockApp();
-		executor = new ToolExecutor(mockApp as unknown as import('obsidian').App, defaultConfig);
+		mockVaultHost = createMockVaultHost();
+		mockTerminalHost = createMockTerminalHost();
+		executor = new ToolExecutor(mockVaultHost, mockTerminalHost, defaultConfig);
 	});
 
 	describe('canAutoConfirm', () => {
