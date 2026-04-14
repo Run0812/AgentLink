@@ -5,10 +5,7 @@
  * All write operations require user confirmation (unless auto-confirm enabled).
  * ──────────────────────────────────────────────────────────────────────── */
 
-// Note: Obsidian types are imported for type checking only.
-// The actual implementation uses the App interface from obsidian.
-import type { App, TFile, TFolder } from 'obsidian';
-import { spawn } from 'child_process';
+import type { TFile } from 'obsidian';
 
 // Simple normalizePath implementation for when obsidian is not available
 function normalizePath(path: string): string {
@@ -16,6 +13,8 @@ function normalizePath(path: string): string {
 }
 import { ToolCall, ToolResult, ToolType, TOOL_METADATA } from '../core/types';
 import { logger } from '../core/logger';
+import type { VaultHost } from '../host/obsidian/vault-host';
+import type { TerminalHost } from '../host/terminal/node-terminal-host';
 
 export interface ToolExecutorConfig {
 	/** Vault root as workspace */
@@ -46,11 +45,13 @@ interface TerminalShellRuntime {
  *   - Return structured results
  */
 export class ToolExecutor {
-	private app: App;
 	private config: ToolExecutorConfig;
 
-	constructor(app: App, config: ToolExecutorConfig) {
-		this.app = app;
+	constructor(
+		private readonly vaultHost: VaultHost,
+		private readonly terminalHost: TerminalHost,
+		config: ToolExecutorConfig,
+	) {
 		this.config = config;
 	}
 
@@ -126,7 +127,7 @@ export class ToolExecutor {
 		}
 
 		const normalizedPath = normalizePath(path);
-		const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+		const file = this.vaultHost.getAbstractFileByPath(normalizedPath);
 
 		if (!file) {
 			return { success: false, content: `File not found: ${path}` };
@@ -137,7 +138,7 @@ export class ToolExecutor {
 			return { success: false, content: `Path is not a file: ${path}` };
 		}
 
-		const content = await this.app.vault.read(file as TFile);
+		const content = await this.vaultHost.read(file as TFile);
 		return {
 			success: true,
 			content,
@@ -148,7 +149,7 @@ export class ToolExecutor {
 	private async executeListDir(params: Record<string, unknown>): Promise<ToolResult> {
 		const path = (params.path as string) || '.';
 		const normalizedPath = normalizePath(path);
-		const folder = this.app.vault.getAbstractFileByPath(normalizedPath);
+		const folder = this.vaultHost.getAbstractFileByPath(normalizedPath);
 
 		if (!folder) {
 			return { success: false, content: `Directory not found: ${path}` };
@@ -202,7 +203,7 @@ export class ToolExecutor {
 		const normalizedPath = normalizePath(path);
 
 		// Check if file exists
-		const existing = this.app.vault.getAbstractFileByPath(normalizedPath);
+		const existing = this.vaultHost.getAbstractFileByPath(normalizedPath);
 		if (existing) {
 			return {
 				success: false,
@@ -211,7 +212,7 @@ export class ToolExecutor {
 		}
 
 		// Create the file
-		await this.app.vault.create(normalizedPath, content || '');
+		await this.vaultHost.create(normalizedPath, content || '');
 
 		return {
 			success: true,
@@ -231,7 +232,7 @@ export class ToolExecutor {
 		}
 
 		const normalizedPath = normalizePath(path);
-		const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+		const file = this.vaultHost.getAbstractFileByPath(normalizedPath);
 
 		if (!file) {
 			return { success: false, content: `File not found: ${path}` };
@@ -242,7 +243,7 @@ export class ToolExecutor {
 		}
 
 		try {
-			const currentContent = await this.app.vault.read(file as TFile);
+			const currentContent = await this.vaultHost.read(file as TFile);
 
 			// Method 1: Search and replace (preferred for precise edits)
 			if (oldString !== undefined && newString !== undefined) {
@@ -255,7 +256,7 @@ export class ToolExecutor {
 				}
 
 				const updatedContent = currentContent.replace(oldString, newString);
-				await this.app.vault.modify(file as TFile, updatedContent);
+				await this.vaultHost.modify(file as TFile, updatedContent);
 
 				return {
 					success: true,
@@ -271,7 +272,7 @@ export class ToolExecutor {
 
 			// Method 2: Full content replacement (if content parameter provided)
 			if (content !== undefined) {
-				await this.app.vault.modify(file as TFile, content);
+				await this.vaultHost.modify(file as TFile, content);
 				return {
 					success: true,
 					content: `File updated successfully: ${normalizedPath}`,
@@ -392,77 +393,20 @@ export class ToolExecutor {
 	}): Promise<ToolResult> {
 		const { command, workingDir, timeoutMs, shell } = input;
 
-		return new Promise((resolve) => {
-			let stdout = '';
-			let stderr = '';
-			let finished = false;
+		const result = await this.terminalHost.execute(
+			shell.executable,
+			[...shell.argsPrefix, command],
+			{ cwd: workingDir, timeout: timeoutMs },
+		);
 
-			const child = spawn(shell.executable, [...shell.argsPrefix, command], {
-				cwd: workingDir,
-				env: process.env,
-				shell: false,
-				stdio: ['ignore', 'pipe', 'pipe'],
-			});
-
-			const timeoutId = setTimeout(() => {
-				if (finished) {
-					return;
-				}
-				finished = true;
-				child.kill('SIGTERM');
-				resolve({
-					success: false,
-					content: `Command timed out after ${timeoutMs}ms`,
-					metadata: {
-						command,
-						timeout: timeoutMs,
-						stdout: stdout.slice(0, 10000),
-						stderr: stderr.slice(0, 10000),
-					},
-				});
-			}, timeoutMs);
-
-			child.stdout?.on('data', (data: Buffer) => {
-				stdout += data.toString();
-			});
-
-			child.stderr?.on('data', (data: Buffer) => {
-				stderr += data.toString();
-			});
-
-			child.on('close', (code) => {
-				if (finished) {
-					return;
-				}
-				finished = true;
-				clearTimeout(timeoutId);
-
-				const output = stdout + (stderr ? `\n[stderr]:\n${stderr}` : '');
-				resolve({
-					success: code === 0,
-					content: output || '(no output)',
-					metadata: {
-						command,
-						exitCode: code,
-						stdout: stdout.slice(0, 10000),
-						stderr: stderr.slice(0, 10000),
-					},
-				});
-			});
-
-			child.on('error', (error) => {
-				if (finished) {
-					return;
-				}
-				finished = true;
-				clearTimeout(timeoutId);
-				resolve({
-					success: false,
-					content: `Failed to execute command: ${error.message}`,
-					metadata: { command, error: error.message, errorCode: (error as NodeJS.ErrnoException).code },
-				});
-			});
-		});
+		return {
+			success: result.success,
+			content: result.content,
+			metadata: {
+				command,
+				...result.metadata,
+			},
+		};
 	}
 
 	private resolveTerminalShellCandidates(): TerminalShellRuntime[] {

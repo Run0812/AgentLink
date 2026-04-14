@@ -35,6 +35,17 @@
 
 ## 当前焦点任务
 
+### ACP 核心化重构（2026-04-14）
+
+**目标**: 在保持现有用户行为的前提下，将聊天流程逐步收敛为 `host + acp + core + ui` 边界。
+
+- [x] 新增 `src/host/`，收敛 vault / workspace / notice / terminal 副作用边界
+- [x] 新增 `src/acp/`，补充 ACP event schema / normalizer / turn state machine
+- [x] 将 ChatView 的发送、取消、工具确认、文件应用、会话切换流程迁移到 `core/` 服务
+- [x] 移除 ChatView 对 `AcpBridgeAdapter` 具体类型的直接依赖
+- [x] 增补 ACP 归一化、取消语义、turn 状态与 prompt context 单元测试
+- [x] 同步更新 `AGENTS.md`、`.memory/`、`Doc/Developer-Guide.md`
+
 ### Phase 6 - UI-UX 优化（当前重点）
 
 **目标**: 修复 UI 交互问题，并补齐 ACP Slash Commands / Session Modes / Agent Plan / Session Config Options 的用户可见能力
@@ -115,6 +126,7 @@
 
 ## 最近完成
 
+- [x] ACP 核心化重构 - 引入 `host/`、`acp/`、`core/` 边界并完成测试与文档同步
 - [x] UI/UX 文档更新 - 明确输入状态栏位置和功能
 - [x] Phase 0-4 全部完成
 

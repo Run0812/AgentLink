@@ -83,20 +83,7 @@ npm run dev
 
 ## 测试策略
 
-### 1. Mock 测试
-
-MockAdapter 支持模拟：
-- 流式文本回复
-- Thinking 过程
-- 工具调用请求（read_file, edit_file）
-
-**测试方式**:
-1. 在设置中选择 "Mock" 后端
-2. 发送测试消息
-3. 输入 "error" 测试错误处理
-4. 输入 "terminal:" 测试工具调用
-
-### 2. ACP Bridge 测试
+### 1. ACP Bridge 测试
 
 **前置准备**:
 1. 确保 Kimi CLI 已安装并登录: `kimi --version`
@@ -131,7 +118,7 @@ node test-kimi-acp.js
 3. 启用插件并选择 "🌙 Kimi Code (ACP)" 后端
 4. 开始对话
 
-### 3. 单元测试
+### 2. 单元测试
 
 ```bash
 # 运行所有测试
@@ -147,6 +134,13 @@ npm run test:coverage
 **测试文件位置**:
 - `test/unit/` - 单元测试
 - `test/fixtures/` - 测试固件
+
+**当前重点覆盖**:
+- ACP event normalization
+- cancel 后的 pending permission 收敛
+- turn state machine 与 stale update 丢弃
+- prompt context 采集
+- tool executor 的 host 边界行为
 
 ---
 
@@ -404,4 +398,4 @@ npm version major  # 大版本
 
 ---
 
-*最后更新: 2026-04-13*
+*最后更新: 2026-04-14*

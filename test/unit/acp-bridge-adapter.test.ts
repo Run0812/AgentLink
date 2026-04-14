@@ -408,6 +408,51 @@ describe('AcpBridgeAdapter', () => {
 			});
 		});
 
+		it('cancels pending permission requests when the adapter is cancelled', async () => {
+			adapter.setCallbacks({
+				onPermissionRequest: () => {
+					// Leave unresolved until adapter.cancel() resolves it.
+				},
+			});
+
+			const pending = adapter.handlePermissionRequest({
+				sessionId: 'session-1',
+				toolCall: {
+					toolCallId: 'call-3',
+					toolName: 'terminal',
+					title: 'Run terminal',
+				},
+				options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+			} as never);
+
+			await adapter.cancel();
+
+			await expect(pending).resolves.toEqual({
+				outcome: {
+					outcome: 'cancelled',
+				},
+			});
+		});
+
+		it('drops turn-bound updates when no turn is active', () => {
+			const handlers = {
+				onChunk: vi.fn(),
+				onComplete: vi.fn(),
+				onError: vi.fn(),
+			};
+			const internal = adapter as unknown as {
+				currentHandlers: typeof handlers;
+			};
+			internal.currentHandlers = handlers;
+
+			adapter.handleNormalizedEvent({
+				kind: 'message_chunk',
+				text: 'late update',
+			});
+
+			expect(handlers.onChunk).not.toHaveBeenCalled();
+		});
+
 		it('stores ACP context usage when the agent reports used and max tokens', () => {
 			adapter.handleContextUsageUpdate({
 				used: 2700,

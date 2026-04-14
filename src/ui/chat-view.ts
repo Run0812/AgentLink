@@ -22,11 +22,17 @@ import { SessionManager } from '../services/session-manager';
 import { ContextService } from '../services/context-service';
 import { InputAutocomplete, createSlashCommandSuggestions, createAvailableCommandSuggestions, createFileSuggestions, createFolderSuggestions, createTopicSuggestions, AutocompleteTrigger, buildAgentSlashCommandText } from './components/input-autocomplete';
 import { parseBuiltinSlashCommandPrompt } from './slash-command-utils';
-import type { AcpBridgeAdapter } from '../adapters/acp-bridge-adapter';
 import { ToolbarController } from './controllers/toolbar-controller';
 import { HeaderSessionController } from './controllers/header-session-controller';
 import { MessageListRenderer } from './controllers/message-list-renderer';
 import { ComposerController, InlineTokenConfig } from './controllers/composer-controller';
+import { ObsidianVaultHost } from '../host/obsidian/vault-host';
+import { ObsidianWorkspaceHost } from '../host/obsidian/workspace-host';
+import { ObsidianNoticeHost } from '../host/obsidian/notice-host';
+import { NodeTerminalHost } from '../host/terminal/node-terminal-host';
+import { PromptContextService } from '../core/prompt-context-service';
+import { ChatTurnService } from '../core/chat-turn-service';
+import { ChatSessionService } from '../core/chat-session-service';
 
 export const AGENTLINK_VIEW_TYPE = 'agentlink-view';
 
@@ -43,10 +49,16 @@ export class ChatView extends ItemView {
 	private sessionManager: SessionManager;
 	private currentSessionId: string | null = null;
 	private contextService: ContextService;
+	private vaultHost: ObsidianVaultHost;
+	private workspaceHost: ObsidianWorkspaceHost;
+	private noticeHost: ObsidianNoticeHost;
+	private promptContextService: PromptContextService;
 	private toolbarController: ToolbarController;
 	private headerSessionController: HeaderSessionController;
 	private messageListRenderer: MessageListRenderer;
 	private composerController: ComposerController;
+	private turnService: ChatTurnService;
+	private chatSessionService: ChatSessionService;
 
 	// Maximum number of recent messages to include as conversation context
 	private static readonly MAX_CONTEXT_MESSAGES = 20;
@@ -96,6 +108,7 @@ export class ChatView extends ItemView {
 	// ── Streaming state ────────────────────────────────────────────────
 	private streamingMsgId: string | null = null;
 	private streamingEl: HTMLElement | null = null;
+	private thinkingMessageIds = new Map<string, string>();
 
 	// ── ACP Session Config ───────────────────────────────────────────────
 	private sessionConfig: SessionConfigState = { configOptions: [] };
@@ -123,6 +136,9 @@ export class ChatView extends ItemView {
 		this.onSettingsRead = onSettingsRead;
 		this.onSettingsSave = onSettingsSave;
 		this.sessionManager = sessionManager;
+		this.vaultHost = new ObsidianVaultHost(this.app);
+		this.workspaceHost = new ObsidianWorkspaceHost(this.app);
+		this.noticeHost = new ObsidianNoticeHost();
 		
 		// Initialize ToolExecutor with default config
 		const toolConfig: ToolExecutorConfig = {
@@ -132,8 +148,9 @@ export class ChatView extends ItemView {
 			terminalShell: settings.terminalShell,
 			terminalShellCustomPath: settings.terminalShellCustomPath,
 		};
-		this.toolExecutor = new ToolExecutor(this.app, toolConfig);
+		this.toolExecutor = new ToolExecutor(this.vaultHost, new NodeTerminalHost(), toolConfig);
 		this.contextService = new ContextService(this.app.vault);
+		this.promptContextService = new PromptContextService(this.workspaceHost, this.vaultHost);
 
 		this.toolbarController = new ToolbarController({
 			getSettings: () => this.settings,
@@ -184,6 +201,84 @@ export class ChatView extends ItemView {
 			getInputEl: () => this.inputEl ?? null,
 			onAttachmentRemove: (attachmentId) => this.contextService.removeAttachment(attachmentId),
 		});
+
+		this.turnService = new ChatTurnService({
+			getAdapter: () => this.adapter,
+			sessionStore: this.session,
+			contextService: this.contextService,
+			promptContextService: this.promptContextService,
+			toolExecutor: this.toolExecutor,
+			noticeHost: this.noticeHost,
+			presenter: {
+				renderMessage: (message) => {
+					this.renderMessage(message);
+				},
+				updateAssistantMessage: (messageId, content) => {
+					this.session.updateMessage(messageId, content);
+					const messageEl = this.messagesEl?.querySelector(`[data-msg-id="${messageId}"] .agentlink-message-content`) as HTMLElement | null;
+					if (messageEl) {
+						this.renderAssistantContent(messageEl, content);
+					}
+				},
+				updateThinkingMessage: (assistantMessageId, content) => {
+					const existingThinkingMessageId = this.thinkingMessageIds.get(assistantMessageId);
+					let thinkingMessage = existingThinkingMessageId
+						? this.session.getMessages().find((message) => message.id === existingThinkingMessageId)
+						: undefined;
+					if (!thinkingMessage) {
+						thinkingMessage = this.session.addMessage('thinking', '');
+						this.thinkingMessageIds.set(assistantMessageId, thinkingMessage.id);
+						const assistantEl = this.messagesEl?.querySelector(`[data-msg-id="${assistantMessageId}"]`);
+						const thinkingEl = this.renderMessage(thinkingMessage);
+						if (assistantEl && this.messagesEl.contains(assistantEl)) {
+							this.messagesEl.insertBefore(thinkingEl, assistantEl);
+						}
+					}
+
+					this.session.updateMessage(thinkingMessage.id, content);
+					const thinkingMsgEl = this.messagesEl?.querySelector(`[data-msg-id="${thinkingMessage.id}"]`);
+					const bodyEl = thinkingMsgEl?.querySelector('.agentlink-thinking-body') as HTMLElement | null;
+					if (bodyEl) {
+						bodyEl.empty();
+						MarkdownRenderer.render(this.app, content, bodyEl, '', this);
+					}
+				},
+				rerenderMessage: (messageId) => this.rerenderMessage(messageId),
+				appendStatusMessage: (text) => this.appendStatusMessage(text),
+				renderInlineError: (message) => this.renderInlineError(message),
+				setBusy: (busy) => this.setBusy(busy),
+				finishStreaming: () => this.finishStreaming(),
+				scrollToBottom: () => this.scrollToBottom(),
+			},
+		});
+
+		this.chatSessionService = new ChatSessionService({
+			sessionStore: this.session,
+			sessionManager: this.sessionManager,
+			getAdapter: () => this.adapter,
+			getCurrentSessionId: () => this.currentSessionId,
+			setCurrentSessionId: (sessionId) => {
+				this.currentSessionId = sessionId;
+			},
+			getActiveBackendId: () => getActiveBackendConfig(this.settings)?.id,
+			presenter: {
+				clearMessages: () => {
+					this.thinkingMessageIds.clear();
+					this.messagesEl?.empty();
+				},
+				renderWelcome: () => this.renderWelcome(),
+				renderMessage: (message) => {
+					this.renderMessage(message);
+				},
+				updateSessionTitle: (title) => this.updateSessionTitle(title),
+				refreshStatus: () => this.refreshStatus(),
+				renderInputStateBar: () => this.renderInputStateBar(),
+				focusComposer: () => this.inputEl?.focus(),
+			},
+			onWarning: (message, error) => {
+				logger.error(message, error);
+			},
+		});
 	}
 
 	getViewType(): string {
@@ -203,8 +298,7 @@ export class ChatView extends ItemView {
 		const previousAdapter = this.adapter;
 		this.detachSessionStateListener?.();
 		this.adapter = adapter;
-		const acpAdapter = adapter as AcpBridgeAdapter & { subscribeSessionState?: (listener: () => void) => () => void };
-		this.detachSessionStateListener = acpAdapter.subscribeSessionState?.(() => {
+		this.detachSessionStateListener = adapter.subscribeSessionState?.(() => {
 			this.refreshStatus();
 			void this.refreshSessionFeatures();
 			this.refreshAutocompleteFromInput();
@@ -1096,148 +1190,16 @@ export class ChatView extends ItemView {
 		const prompt = originalPrompt;
 		if (!prompt || this.isBusy) return;
 
-		if (!this.adapter) {
-			new Notice('AgentLink: No backend adapter configured.');
-			return;
-		}
-
-		// Add user message
-		const userMsg = this.session.addMessage('user', prompt);
-		this.renderMessage(userMsg);
 		this.clearComposer();
-
-		// Show busy state
-		this.setBusy(true);
-
-		// Prepare assistant message placeholder
-		const assistantMsg = this.session.addMessage('assistant', '');
-		this.streamingMsgId = assistantMsg.id;
-		const assistantEl = this.renderMessage(assistantMsg);
-		this.streamingEl = assistantEl.querySelector('.agentlink-message-content') as HTMLElement;
-
-		// Gather context
-		let fileContent: string | undefined;
-		let selectedText: string | undefined;
-
-		const editor = this.app.workspace.activeEditor?.editor;
-		if (editor) {
-			const sel = editor.getSelection();
-			if (sel) selectedText = sel;
-		}
-		if (!selectedText) {
-			const file = this.app.workspace.getActiveFile();
-			if (file) {
-			try {
-				fileContent = await this.app.vault.read(file);
-			} catch {
-				// ignore
-			}
-			}
-		}
-
-		const input: AgentInput = {
-			prompt,
-			attachments: this.contextService.listAttachments(),
-			context: { fileContent, selectedText },
-			history: this.session.getRecentMessages(ChatView.MAX_CONTEXT_MESSAGES).slice(0, -1), // exclude the just-added placeholder
-		};
-
-		let accumulated = '';
-		let accumulatedThinking = '';
-		let thinkingMsgId: string | null = null;
-		let thinkingEl: HTMLElement | null = null;
-		let isThinkingVisible = false;
-
-		const handlers: StreamHandlers = {
-			onChunk: (chunk: string) => {
-				accumulated += chunk;
-				if (this.streamingEl) {
-					this.renderAssistantContent(this.streamingEl, accumulated);
-				}
-				this.session.updateMessage(assistantMsg.id, accumulated);
-				this.scrollToBottom();
-			},
-			onComplete: (fullText: string) => {
-				this.session.updateMessage(assistantMsg.id, fullText);
-				if (this.streamingEl) {
-					this.renderAssistantContent(this.streamingEl, fullText);
-				}
-				this.finishStreaming();
-			},
-			onError: (error: Error) => {
-				if (error instanceof CancellationError) {
-					// Mark partial response
-					const partial = accumulated || '(cancelled)';
-					this.session.updateMessage(assistantMsg.id, partial);
-					if (this.streamingEl) {
-						this.renderAssistantContent(this.streamingEl, partial);
-					}
-					this.appendStatusMessage('Generation stopped by user.');
-				} else {
-					// Show error message
-					this.session.addMessage('error', error.message);
-					this.renderInlineError(error.message);
-				}
-				this.finishStreaming();
-			},
-		};
-
-		// Options with onThinkingChunk callback
-		const options = {
-			onThinkingChunk: (text: string) => {
-				accumulatedThinking += text;
-				
-				// Create thinking message on first chunk
-				if (!thinkingMsgId) {
-					const thinkingMsg = this.session.addMessage('thinking', '');
-					thinkingMsgId = thinkingMsg.id;
-					// Insert thinking message BEFORE assistant message
-					const assistantEl = this.messagesEl.querySelector(`[data-msg-id="${assistantMsg.id}"]`);
-					if (assistantEl) {
-						const thinkingEl = this.renderMessage(thinkingMsg);
-						this.messagesEl.insertBefore(thinkingEl, assistantEl);
-					}
-					isThinkingVisible = true;
-				}
-				
-				// Update thinking message content with Markdown rendering
-				if (thinkingMsgId) {
-					this.session.updateMessage(thinkingMsgId, accumulatedThinking);
-					const thinkingMsgEl = this.messagesEl.querySelector(`[data-msg-id="${thinkingMsgId}"]`);
-					if (thinkingMsgEl) {
-						const contentEl = thinkingMsgEl.querySelector('.agentlink-message-content') as HTMLElement;
-						if (contentEl) {
-							const bodyEl = contentEl.querySelector('.agentlink-thinking-body') as HTMLElement;
-							if (bodyEl) {
-								bodyEl.empty();
-								// Use MarkdownRenderer for thinking content
-								MarkdownRenderer.render(this.app, accumulatedThinking, bodyEl, '', this);
-							}
-						}
-					}
-				}
-				this.scrollToBottom();
-			},
-		};
-
-		try {
-			await this.adapter.sendMessage(input, handlers, options);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			this.session.addMessage('error', msg);
-			this.renderInlineError(msg);
-			this.finishStreaming();
-		}
+		await this.turnService.sendMessage(prompt);
 	}
 
 	private async handleStop(): Promise<void> {
-		if (this.adapter) {
-			logger.debug('ChatView: user requested stop');
-			try {
-				await this.adapter.cancel();
-			} catch (err) {
-				logger.error('ChatView: cancel failed', err);
-			}
+		logger.debug('ChatView: user requested stop');
+		try {
+			await this.turnService.cancelTurn();
+		} catch (err) {
+			logger.error('ChatView: cancel failed', err);
 		}
 	}
 
@@ -1308,6 +1270,7 @@ export class ChatView extends ItemView {
 
 	private clearConversation(): void {
 		this.session.clear();
+		this.thinkingMessageIds.clear();
 		this.messagesEl.empty();
 		this.renderWelcome();
 		this.statusEl?.setText('');
@@ -1356,67 +1319,7 @@ export class ChatView extends ItemView {
 	// Tool call & file edit handlers
 
 	private async handleToolConfirm(msgId: string): Promise<void> {
-		logger.debug('ChatView: tool call confirmed', msgId);
-		
-		const msg = this.session.getMessages().find(m => m.id === msgId);
-		if (!msg || !msg.metadata || !('toolCallId' in msg.metadata)) {
-			logger.error('ChatView: tool call message not found or invalid', msgId);
-			return;
-		}
-
-		const meta = msg.metadata;
-		const toolCall: ToolCall = {
-			id: meta.toolCallId,
-			tool: meta.tool,
-			params: meta.params,
-		};
-
-		// Update UI to show executing state
-		this.session.updateMessageMetadata(msgId, { ...meta, status: 'executing' });
-		this.rerenderMessage(msgId);
-
-		// Execute the tool
-		const result = await this.toolExecutor.execute(toolCall);
-
-		// Update with result
-		this.session.updateMessageMetadata(msgId, { ...meta, status: result.success ? 'completed' : 'error', result });
-		this.rerenderMessage(msgId);
-
-		// If successful, add the result to the session for context
-		if (result.success) {
-			this.session.addWorkspaceFile(meta.params.path as string);
-		}
-
-		// Send result back to agent for continuation
-		await this.sendToolResultToAgent(toolCall, result);
-	}
-
-	private async sendToolResultToAgent(toolCall: ToolCall, result: ToolResult): Promise<void> {
-		if (!this.adapter) {
-			logger.warn('ChatView: no adapter to send tool result');
-			return;
-		}
-
-		// Check if adapter supports executeTool (for direct tool execution)
-		if (this.adapter.executeTool) {
-			// Some adapters handle tool execution internally
-			// We've already executed it, so we just notify the user
-			logger.debug('ChatView: tool result available for agent', toolCall.id);
-		}
-
-		// For adapters that expect the tool result in the next message
-		// We add a system message with the result that will be included in context
-		const resultContent = typeof result.content === 'string' 
-			? result.content 
-			: JSON.stringify(result.content);
-		
-		const contextMsg = `Tool "${toolCall.tool}" result:\n${resultContent}`;
-		
-		// Add as a system message to be included in context
-		this.session.addMessage('system', contextMsg);
-		
-		// Show notification
-		new Notice(`Tool ${toolCall.tool} ${result.success ? 'completed' : 'failed'}`);
+		await this.turnService.confirmToolCall(msgId);
 	}
 
 	private rerenderMessage(msgId: string): void {
@@ -1428,162 +1331,38 @@ export class ChatView extends ItemView {
 
 	private async handleToolReject(msgId: string): Promise<void> {
 		logger.debug('ChatView: tool call rejected', msgId);
-		this.session.updateMessageMetadata(msgId, {
-			toolCallId: msgId,
-			tool: 'unknown',
-			params: {},
-			status: 'rejected',
-		});
-		this.rerenderMessage(msgId);
+		await this.turnService.rejectToolCall(msgId);
 	}
 
 	private async handleFileEditConfirm(msgId: string): Promise<void> {
 		logger.debug('ChatView: file edit confirmed', msgId);
-		
-		const msg = this.session.getMessages().find(m => m.id === msgId);
-		if (!msg || !msg.metadata || !('path' in msg.metadata)) {
-			logger.error('ChatView: file edit message not found or invalid', msgId);
-			return;
-		}
-
-		const meta = msg.metadata as FileEditMetadata;
-		const { path, original, modified } = meta;
-
-		// Update UI to show executing state
-		this.session.updateMessageMetadata(msgId, { path, original, modified, status: 'executing' } as FileEditMetadata);
-		this.rerenderMessage(msgId);
-
-		// Use write_file tool to apply the changes
-		const toolCall: ToolCall = {
-			id: `edit_${Date.now()}`,
-			tool: 'write_file',
-			params: { path, content: modified },
-		};
-
-		const result = await this.toolExecutor.execute(toolCall);
-
-		// Update with result
-		const newStatus = result.success ? 'confirmed' : 'error';
-		this.session.updateMessageMetadata(msgId, { path, original, modified, status: newStatus } as FileEditMetadata);
-		this.rerenderMessage(msgId);
-
-		if (result.success) {
-			new Notice(`File changes applied to ${path}`);
-			
-			// Add system message about the edit
-			this.session.addMessage('system', `File edited: ${path}`);
-		} else {
-			new Notice(`Failed to apply changes: ${result.content}`);
-		}
+		await this.turnService.confirmFileEdit(msgId);
 	}
 
 	private async handleFileEditReject(msgId: string): Promise<void> {
 		logger.debug('ChatView: file edit rejected', msgId);
-		
-		const msg = this.session.getMessages().find(m => m.id === msgId);
-		if (!msg || !msg.metadata || !('path' in msg.metadata)) {
-			logger.error('ChatView: file edit message not found or invalid', msgId);
-			return;
-		}
-
-		const meta = msg.metadata as FileEditMetadata;
-		this.session.updateMessageMetadata(msgId, {
-			path: meta.path,
-			original: meta.original,
-			modified: meta.modified,
-			status: 'rejected',
-		});
-		this.rerenderMessage(msgId);
+		this.turnService.rejectFileEdit(msgId);
 	}
 
 	// ── Session Management ───────────────────────────────────────────────
 
 	/** Initialize session on open - load existing or create new */
 	private initializeSession(): void {
-		// Try to get current session from manager
-		const currentSession = this.sessionManager.getCurrentSession();
-		if (currentSession && currentSession.messages.length > 0) {
-			this.loadSession(currentSession.id);
-		} else {
-			// Create new session
-			this.createNewSession();
-		}
+		this.chatSessionService.initializeSession();
 	}
 
 	/** Create a new session */
 	private createNewSession(): void {
-		if (this.currentSessionId) {
-			this.persistCurrentSession('switch-create-session');
-		}
-
-		// Prevent creating duplicate empty sessions
-		if (this.currentSessionId) {
-			const currentSession = this.sessionManager.getSession(this.currentSessionId);
-			if (currentSession && currentSession.messages.length === 0) {
-				// Current session is already empty, just focus it
-				void this.prepareAdapterSession({ reset: true });
-				this.inputEl?.focus();
-				return;
-			}
-		}
-		
-		const session = this.sessionManager.createSession();
-		this.currentSessionId = session.id;
-		this.session.clear();
-		this.messagesEl.empty();
-		this.renderWelcome();
-		this.updateSessionTitle(session.title);
-		this.refreshStatus();
-		this.renderInputStateBar();
-		void this.prepareAdapterSession({ reset: true });
-		this.inputEl?.focus();
+		this.chatSessionService.createNewSession();
 	}
 
 	/** Load a session by ID */
 	private loadSession(sessionId: string): void {
-		const session = this.sessionManager.getSession(sessionId);
-		if (!session) return;
-		if (this.currentSessionId && this.currentSessionId !== sessionId) {
-			this.persistCurrentSession('switch-load-session');
-		}
-
-		this.currentSessionId = sessionId;
-		this.sessionManager.setCurrentSession(sessionId);
-		this.session.clear();
-		this.messagesEl.empty();
-
-		// Load messages
-		for (const msg of session.messages) {
-			const restored = this.session.addMessage(msg.role, msg.content, msg.metadata);
-			restored.id = msg.id;
-			restored.timestamp = msg.timestamp;
-			this.renderMessage(restored);
-		}
-
-		this.updateSessionTitle(session.title);
-		this.refreshStatus();
-		this.renderInputStateBar();
-		void this.prepareAdapterSession();
+		this.chatSessionService.loadSession(sessionId);
 	}
 
 	private async prepareAdapterSession(options?: { reset?: boolean }): Promise<void> {
-		if (!this.adapter) {
-			return;
-		}
-
-		try {
-			if (this.adapter.prepareSession) {
-				await this.adapter.prepareSession(options);
-				return;
-			}
-
-			await this.adapter.connect();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			logger.error('ChatView: failed to prepare adapter session', error);
-			console.error('[ChatView] Failed to prepare adapter session:', message);
-			this.refreshStatus();
-		}
+		await this.chatSessionService.prepareAdapterSession(options);
 	}
 
 	/** Update the session title in UI */
@@ -1678,10 +1457,7 @@ export class ChatView extends ItemView {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
-		await this.sessionManager.deleteSession(sessionId);
-		if (sessionId === this.currentSessionId) {
-			this.createNewSession();
-		}
+		await this.chatSessionService.deleteSession(sessionId);
 	}
 
 	/** Render Agent selector dropdown */
@@ -1706,20 +1482,11 @@ export class ChatView extends ItemView {
 
 	/** Save current session */
 	private async saveCurrentSession(): Promise<void> {
-		if (this.currentSessionId) {
-			const backend = getActiveBackendConfig(this.settings);
-			await this.sessionManager.updateSession(
-				this.currentSessionId,
-				this.session.getMessages(),
-				backend?.id
-			);
-		}
+		await this.chatSessionService.saveCurrentSession();
 	}
 
 	private persistCurrentSession(reason: string): void {
-		void this.saveCurrentSession().catch((error) => {
-			logger.warn(`ChatView: failed to persist session (${reason})`, error);
-		});
+		this.chatSessionService.persistCurrentSession(reason);
 	}
 
 	// ── Phase 5: Input State Bar & Autocomplete ─────────────────────────
