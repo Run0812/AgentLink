@@ -55,7 +55,8 @@ export class ToolbarController {
 			item.style.display = 'flex';
 			item.style.alignItems = 'center';
 			item.style.gap = '0.35rem';
-			item.style.minHeight = '32px';
+			item.style.height = '34px';
+			item.style.minHeight = '34px';
 			item.style.padding = '0.35rem 0.4rem';
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
@@ -80,6 +81,7 @@ export class ToolbarController {
 			const name = item.createEl('span', { text: backend.name });
 			name.style.flex = '1';
 			this.deps.applySingleLineEllipsis(name, '0.75rem');
+			item.title = backend.name;
 
 			if (backend.id === activeBackend?.id) {
 				const check = item.createEl('span');
@@ -118,10 +120,10 @@ export class ToolbarController {
 			item.type = 'button';
 			item.style.width = '100%';
 			item.style.display = 'flex';
-			item.style.flexDirection = 'column';
-			item.style.alignItems = 'stretch';
-			item.style.gap = '0.12rem';
-			item.style.minHeight = '40px';
+			item.style.alignItems = 'center';
+			item.style.gap = '0.35rem';
+			item.style.height = '34px';
+			item.style.minHeight = '34px';
 			item.style.padding = '0.38rem 0.4rem';
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
@@ -134,12 +136,13 @@ export class ToolbarController {
 			item.style.cursor = 'pointer';
 			this.deps.applyToolbarDropdownItemStyle(item);
 
-			const name = item.createEl('div', { text: model.name });
+			const name = item.createEl('span', { text: model.name });
 			name.style.fontWeight = '600';
+			name.style.flex = '1';
 			this.deps.applySingleLineEllipsis(name, '0.75rem');
-
-			const desc = item.createEl('div', { text: model.description ?? '' });
-			this.deps.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
+			item.title = model.description
+				? `${model.name}\n${model.description}`
+				: model.name;
 
 			item.addEventListener('click', async () => {
 				await this.deps.onConfigOptionChange(modelOption.id, model.value);
@@ -168,10 +171,10 @@ export class ToolbarController {
 			item.type = 'button';
 			item.style.width = '100%';
 			item.style.display = 'flex';
-			item.style.flexDirection = 'column';
-			item.style.alignItems = 'stretch';
-			item.style.gap = '0.12rem';
-			item.style.minHeight = '40px';
+			item.style.alignItems = 'center';
+			item.style.gap = '0.35rem';
+			item.style.height = '34px';
+			item.style.minHeight = '34px';
 			item.style.padding = '0.38rem 0.4rem';
 			item.style.marginBottom = '0.1rem';
 			item.style.border = 'none';
@@ -184,28 +187,20 @@ export class ToolbarController {
 			item.style.cursor = 'pointer';
 			this.deps.applyToolbarDropdownItemStyle(item);
 
-			const nameRow = item.createEl('div');
-			nameRow.style.display = 'flex';
-			nameRow.style.alignItems = 'center';
-			nameRow.style.gap = '0.3rem';
-			nameRow.style.width = '100%';
-
-			const name = nameRow.createEl('span', { text: mode.name });
+			const name = item.createEl('span', { text: mode.name });
 			name.style.fontWeight = '600';
 			name.style.flex = '1';
 			this.deps.applySingleLineEllipsis(name, '0.75rem');
+			item.title = `${mode.name}\n${mode.desc}`;
 
 			if (mode.id === settings.thinkingMode) {
-				const check = nameRow.createEl('span');
+				const check = item.createEl('span');
 				check.innerHTML = '✓';
 				check.style.color = 'var(--interactive-accent)';
 				check.style.fontWeight = 'bold';
 				check.style.fontSize = '0.75rem';
 				check.style.flexShrink = '0';
 			}
-
-			const desc = item.createEl('div', { text: mode.desc });
-			this.deps.applySingleLineEllipsis(desc, '0.7rem', 'var(--text-muted)');
 
 			item.addEventListener('click', async () => {
 				await this.deps.onThinkingModeChange(mode.id);

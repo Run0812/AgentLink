@@ -9,6 +9,78 @@
 
 ---
 
+## 2026-04-14 - Phase 6 封板：Agent Plan 最终项完成并进入待发布
+
+**实现范围**:
+- 完成 Phase 6 最终开发项：Agent Plan 显示协议验收与 UI 打磨
+- 完成阶段状态切换：Phase 6 由进行中转为完成
+- 进入待发布收尾流程
+
+**完成内容**:
+- `ChatView` Plan 面板状态与优先级显示改为可读文本，清理异常符号展示
+- 补齐 `plan` 相关回归测试：normalizer 的有效/空/无效 payload，adapter 的完整替换与空列表清空语义
+- 更新 `01-tasks.md`：Phase 6 标记为完成 100%，新增“待发布收尾（当前重点）”清单
+- 更新 `05-ui-ux.md`：补充 Agent Plan 面板显示规范（完整替换、空态隐藏、即时刷新、可读性要求）
+
+**测试结果**:
+- `npm run lint` 通过
+- `npm test` 通过
+- `npm run build:quick` 通过
+
+**相关文件**:
+- `src/ui/chat-view.ts`
+- `test/unit/acp-event-normalizer.test.ts`
+- `test/unit/acp-bridge-adapter.test.ts`
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+- `.memory/05-ui-ux.md`
+
+---
+
+## 2026-04-14 - Phase 6 最终项启动：Agent Plan 显示协议验收与收口
+
+**实现范围**:
+- 新增 Phase 6 唯一未完成开发项：`Agent Plan 显示（按 ACP 官方 agent-plan 协议验收 + UI 打磨）`
+- 明确完成标准：完整列表替换、动态增删改显示、空列表清空隐藏
+- 明确阶段切换：该项完成即封板并转待发布
+
+**完成内容**:
+- 在任务板中定义最终项的协议验收范围与 UI 可读性要求
+- 锁定实现约束：不新增对外 API，不改 ACP 协议契约，仅做显示层与测试补强
+
+**测试结果**:
+- 本条为启动记录，测试见后续“封板”条目
+
+**相关文件**:
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+
+---
+
+## 2026-04-14 - Phase 6 文档收口：移除 UNSTABLE 认证项并统一进度口径
+
+**实现范围**:
+- 移除 Phase 6 中 `UNSTABLE env_var/terminal` 认证扩展开发项
+- 同步校正 Phase 6 剩余未完成项状态与文档口径
+- 保留 `Phase 6 = 进行中 95%` 作为阶段跟踪口径
+
+**完成内容**:
+- `01-tasks.md` 中移除 `ACP 扩展认证方式（env_var / terminal）` 待办项（Phase 6 区块与待开发功能区块）
+- 将 Phase 6 中已确认完成的收尾项统一改为完成：底部工具栏图标方案、富文本输入细节打磨、README 重写、mock 文案清理
+- 在任务板中补充“95% 进行中为文档口径”的显式说明，避免“清单已空但阶段仍跟踪中”的歧义
+- 将 `phase6-tasks.md` 标注为历史文档，现行状态以 `01-tasks.md` 与 `02-progress.md` 为准
+- 同步修正进度文档中的过期表述（README 待办、UNSTABLE 待补、Phase 6 已完成口径）
+
+**测试结果**:
+- 本次为文档收口，未运行构建或测试
+
+**相关文件**:
+- `.memory/01-tasks.md`
+- `.memory/02-progress.md`
+- `.memory/phase6-tasks.md`
+
+---
+
 ## 2026-04-14 - ACP 核心化重构：引入 host/acp/core 边界并同步文档
 
 **实现范围**:
@@ -702,7 +774,7 @@
 - `AcpBridgeAdapter.initializeProtocol()` 现在会记录 agent 广播的 `authMethods`，并显式声明 `auth.terminal: false`
 - `createSession()` 现在能识别 ACP `Authentication required` 错误，在 `session/new` 失败后触发认证流程
 - 新增认证方式选择逻辑：对稳定的 agent auth method 弹出选择 UI，调用 `connection.authenticate()` 后自动重试创建 session
-- 对 UNSTABLE 的 `env_var` / `terminal` auth method 明确报“不支持”，避免假实现
+- 对 UNSTABLE 的 `env_var` / `terminal` auth method 明确报“不支持”，并在后续文档收口中将其移出 Phase 6 开发项范围
 - 新增单测覆盖认证错误识别、认证后自动重试建 session、仅有不支持 auth method 时的失败路径
 
 **测试结果**:
@@ -725,7 +797,7 @@
 
 **完成内容**:
 - 将任务板中已落地但仍标记为未完成的项目改为已完成，包括输入框快捷键、自动完成菜单快捷键冲突修复、`@` 自动附加、`@current note`、内建 `/clear` `/help` 及其测试
-- 将 `ACP authenticate`、引用标签化渲染、标题栏结构优化、icon 统一方案、README 重写提升为当前剩余重点
+- 将 `ACP authenticate`、引用标签化渲染、标题栏结构优化、icon 统一方案、README 重写提升为当时剩余重点（现已收口）
 - 将 `MockAdapter` 从“待实现”修正为“主流程已移除，残留文案待清理”
 - 更新 `01-tasks.md` 的 Phase 6 完成度和最后更新时间
 
@@ -949,7 +1021,7 @@
 | Phase 3 - ACP Bridge Mode | ✅ 已完成 | 100% |
 | Phase 4 - 历史对话保存功能 | ✅ 已完成 | 100% |
 | Phase 5 - agent命令支持 | ✅ 已完成 | 100% |
-| Phase 6 - UI-UX 优化 | ✅ 已完成 | 95% |
+| Phase 6 - UI-UX 优化 | ✅ 已完成 | 100% |
 
 ---
 

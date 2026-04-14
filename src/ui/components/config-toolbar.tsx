@@ -17,6 +17,7 @@ const TOOLBAR_BUTTON_MIN_WIDTH = '108px';
 const TOOLBAR_BUTTON_MAX_WIDTH = '156px';
 const TOOLBAR_DROPDOWN_MIN_WIDTH = '220px';
 const TOOLBAR_DROPDOWN_MAX_WIDTH = 'min(280px, calc(100vw - 32px))';
+const TOOLBAR_DROPDOWN_MAX_HEIGHT = '320px';
 
 export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 	const [openId, setOpenId] = useState<string | null>(null);
@@ -59,6 +60,7 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 				return (
 					<div key={option.id} style={{ position: 'relative' }}>
 						<button
+							className="agentlink-toolbar-ghost-btn"
 							type="button"
 							onClick={async () => {
 								if (option.type === 'boolean') {
@@ -81,7 +83,7 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 								padding: '0.2rem 0.45rem',
 								boxSizing: 'border-box',
 								background: 'transparent',
-								border: '1px solid var(--background-modifier-border)',
+								border: 'none',
 								borderRadius: '4px',
 								cursor: 'pointer',
 								fontSize: '0.7rem',
@@ -109,6 +111,7 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 
 						{option.type === 'select' && isSelectable && isOpen && (
 							<div
+								className="agentlink-toolbar-dropdown is-align-left agentlink-config-dropdown"
 								style={{
 									position: 'absolute',
 									bottom: '100%',
@@ -116,6 +119,8 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 									zIndex: '1000',
 									minWidth: TOOLBAR_DROPDOWN_MIN_WIDTH,
 									maxWidth: TOOLBAR_DROPDOWN_MAX_WIDTH,
+									maxHeight: TOOLBAR_DROPDOWN_MAX_HEIGHT,
+									overflowY: 'auto',
 									padding: '0.3rem',
 									boxSizing: 'border-box',
 									background: 'var(--background-primary)',
@@ -128,21 +133,23 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 							>
 								{option.options.map((item) => (
 									<button
+										className="agentlink-toolbar-dropdown-item agentlink-config-dropdown-item"
 										key={item.value}
 										type="button"
+										title={item.description ? `${item.name}\n${item.description}` : item.name}
 										onClick={async () => {
 											setOpenId(null);
 											await onSelect(option.id, item.value);
 										}}
 										style={{
 											display: 'flex',
-											flexDirection: 'column',
-											alignItems: 'stretch',
-											gap: '0.12rem',
+											alignItems: 'center',
+											gap: '0.35rem',
 											width: '100%',
-											minHeight: '40px',
+											height: '34px',
+											minHeight: '34px',
 											padding: '0.38rem 0.45rem',
-											marginBottom: '0.15rem',
+											marginBottom: '0',
 											boxSizing: 'border-box',
 											border: 'none',
 											borderRadius: '3px',
@@ -158,6 +165,8 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 									>
 										<div
 											style={{
+												flex: '1',
+												minWidth: 0,
 												lineHeight: '1.3',
 												overflow: 'hidden',
 												textOverflow: 'ellipsis',
@@ -166,19 +175,8 @@ export function ConfigToolbar({ options, onSelect }: ConfigToolbarProps) {
 										>
 											{item.name}
 										</div>
-										{item.description && (
-											<div
-												style={{
-													fontSize: '0.68rem',
-													color: 'var(--text-muted)',
-													lineHeight: '1.3',
-													overflow: 'hidden',
-													textOverflow: 'ellipsis',
-													whiteSpace: 'nowrap',
-												}}
-											>
-												{item.description}
-											</div>
+										{item.value === option.currentValue && (
+											<span style={{ color: 'var(--interactive-accent)', fontSize: '0.75rem', flexShrink: 0 }}>✓</span>
 										)}
 									</button>
 								))}
